@@ -10,7 +10,6 @@ function sendJson(res, status, obj) {
 }
 
 function unauthorized(res) {
-  // This triggers the browser’s built-in username/password prompt
   res.statusCode = 401;
   res.setHeader("WWW-Authenticate", 'Basic realm="Return Label Mailer"');
   res.end("Unauthorized");
@@ -31,10 +30,7 @@ function parseBasicAuth(req) {
   const idx = decoded.indexOf(":");
   if (idx === -1) return null;
 
-  return {
-    user: decoded.slice(0, idx),
-    pass: decoded.slice(idx + 1),
-  };
+  return { user: decoded.slice(0, idx), pass: decoded.slice(idx + 1) };
 }
 
 function getBaseUrl(req) {
@@ -57,7 +53,7 @@ async function buildInstructionsPlusLabelPdf({ labelBase64 }) {
 
   const out = await PDFDocument.create();
 
-  // Add instructions PDF if present at repo root: power-off-instructions.pdf
+  // instructions PDF at repo root
   const instructionsPath = path.join(process.cwd(), "power-off-instructions.pdf");
   if (fs.existsSync(instructionsPath)) {
     const instrBytes = fs.readFileSync(instructionsPath);
@@ -66,7 +62,7 @@ async function buildInstructionsPlusLabelPdf({ labelBase64 }) {
     instrPages.forEach((p) => out.addPage(p));
   }
 
-  // Add a letter-sized page for the 4x6 label
+  // letter-sized label page
   const LETTER_W = 612;
   const LETTER_H = 792;
   const labelLetterPage = out.addPage([LETTER_W, LETTER_H]);
@@ -95,41 +91,46 @@ export default async function handler(req, res) {
       return sendJson(res, 405, { ok: false, error: "Method Not Allowed" });
     }
 
-    // ✅ BASIC AUTH GATE (no secret in HTML)
+    // Basic Auth gate
     const creds = parseBasicAuth(req);
     const expectedUser = process.env.MAIL_USER || "";
     const expectedPass = process.env.MAIL_PASS || "";
-
     if (!expectedUser || !expectedPass) {
       return sendJson(res, 500, { ok: false, error: "Missing MAIL_USER/MAIL_PASS env vars" });
     }
-
     if (!creds || creds.user !== expectedUser || creds.pass !== expectedPass) {
       return unauthorized(res);
     }
 
-    // Body parsing
     const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
 
     if (!process.env.LOB_API_KEY) {
       return sendJson(res, 500, { ok: false, error: "Missing LOB_API_KEY env var" });
     }
 
-    // Required address fields (mail to customer-entered address)
+    // ✅ Match create-label required fields: name, address1, city, state, zip, phone, deviceType
     const name = requireField(body, "name");
     const address1 = requireField(body, "address1");
     const city = requireField(body, "city");
     const state = requireField(body, "state");
     const zip = requireField(body, "zip");
+    const phone = requireField(body, "phone");
+    const deviceType = requireField(body, "deviceType");
 
-    if (!name || !address1 || !city || !state || !zip) {
-      return sendJson(res, 400, {
-        ok: false,
-        error: "Missing required fields: name, address1, city, state, zip",
-      });
+    const missing = [];
+    if (!name) missing.push("name");
+    if (!address1) missing.push("address1");
+    if (!city) missing.push("city");
+    if (!state) missing.push("state");
+    if (!zip) missing.push("zip");
+    if (!phone) missing.push("phone");
+    if (!deviceType) missing.push("deviceType");
+
+    if (missing.length) {
+      return sendJson(res, 400, { ok: false, error: `Missing required fields: ${missing.join(", ")}` });
     }
 
-    // 1) Generate USPS label via your existing endpoint
+    // 1) Create USPS label via your existing route
     const baseUrl = getBaseUrl(req);
     const labelResp = await fetch(`${baseUrl}/api/create-label`, {
       method: "POST",
@@ -140,10 +141,12 @@ export default async function handler(req, res) {
     const labelJson = await labelResp.json().catch(() => null);
 
     if (!labelResp.ok || !labelJson?.ok || !labelJson?.labelData) {
+      // return full details so you can see exact Endicia error in UI
       return sendJson(res, 400, {
         ok: false,
         error: "Label creation failed",
-        details: labelJson || { httpStatus: labelResp.status },
+        httpStatus: labelResp.status,
+        details: labelJson,
       });
     }
 
