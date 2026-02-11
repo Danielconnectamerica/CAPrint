@@ -5,12 +5,40 @@
   <title>Connect America Return Label</title>
   <style>
     body { font-family: Arial, sans-serif; max-width: 650px; margin: 40px auto; }
-    input, select, button { width: 100%; padding: 10px; margin: 8px 0; font-size: 16px; box-sizing: border-box; }
-    button { background-color: #0055A5; color: white; border: none; cursor: pointer; }
-    button:disabled { background-color: #999; cursor: not-allowed; }
-    .error { color: red; font-weight: bold; }
-    .success { color: green; font-weight: bold; }
-    .note { font-size: 13px; color: #444; margin-top: 8px; }
+
+    label { font-weight: bold; display: block; margin-top: 12px; }
+
+    .required-star { color: red; margin-left: 4px; }
+
+    input, select, button {
+      width: 100%;
+      padding: 10px;
+      margin-top: 4px;
+      font-size: 16px;
+      box-sizing: border-box;
+    }
+
+    input.error-field, select.error-field {
+      border: 2px solid red;
+      background-color: #fff5f5;
+    }
+
+    button {
+      background-color: #0055A5;
+      color: white;
+      border: none;
+      cursor: pointer;
+      margin-top: 16px;
+    }
+
+    button:disabled {
+      background-color: #999;
+      cursor: not-allowed;
+    }
+
+    .error { color: red; font-weight: bold; margin-top: 12px; }
+    .success { color: green; font-weight: bold; margin-top: 12px; }
+
     .box {
       border: 1px solid #ddd;
       border-radius: 8px;
@@ -20,7 +48,7 @@
       font-size: 14px;
       line-height: 1.4;
     }
-    .box b { display: inline-block; margin-bottom: 6px; }
+
     .muted { color: #666; font-size: 13px; }
   </style>
 </head>
@@ -29,19 +57,84 @@
 
 <h2>Request a Physical Return Label</h2>
 
-<form id="returnForm">
-  <input type="text" name="name" placeholder="Full Name" required />
-  <input type="text" name="address1" placeholder="Street Address" required />
-  <input type="text" name="address2" placeholder="Apartment / Suite (Optional)" />
-  <input type="text" name="city" placeholder="City" required />
-  <input type="text" name="state" placeholder="State (e.g. NJ)" required />
-  <input type="text" name="zip" placeholder="ZIP Code" required />
+<form id="returnForm" novalidate>
 
-  <input type="text" name="phone" placeholder="Phone Number" required />
+  <label>Full Name<span class="required-star">*</span></label>
+  <input type="text" name="name" required />
 
-  <!-- deviceType value format: "Label|WeightLbs" -->
-  <select name="deviceType" id="deviceType" required>
-    <option value="">Select Package Weight</option>
+  <label>Street Address<span class="required-star">*</span></label>
+  <input type="text" name="address1" required />
+
+  <label>Apartment / Suite</label>
+  <input type="text" name="address2" />
+
+  <label>City<span class="required-star">*</span></label>
+  <input type="text" name="city" required />
+
+  <label>State<span class="required-star">*</span></label>
+  <select name="state" required>
+    <option value="">Select State</option>
+    <option value="AL">Alabama (AL)</option>
+    <option value="AK">Alaska (AK)</option>
+    <option value="AZ">Arizona (AZ)</option>
+    <option value="AR">Arkansas (AR)</option>
+    <option value="CA">California (CA)</option>
+    <option value="CO">Colorado (CO)</option>
+    <option value="CT">Connecticut (CT)</option>
+    <option value="DE">Delaware (DE)</option>
+    <option value="FL">Florida (FL)</option>
+    <option value="GA">Georgia (GA)</option>
+    <option value="HI">Hawaii (HI)</option>
+    <option value="ID">Idaho (ID)</option>
+    <option value="IL">Illinois (IL)</option>
+    <option value="IN">Indiana (IN)</option>
+    <option value="IA">Iowa (IA)</option>
+    <option value="KS">Kansas (KS)</option>
+    <option value="KY">Kentucky (KY)</option>
+    <option value="LA">Louisiana (LA)</option>
+    <option value="ME">Maine (ME)</option>
+    <option value="MD">Maryland (MD)</option>
+    <option value="MA">Massachusetts (MA)</option>
+    <option value="MI">Michigan (MI)</option>
+    <option value="MN">Minnesota (MN)</option>
+    <option value="MS">Mississippi (MS)</option>
+    <option value="MO">Missouri (MO)</option>
+    <option value="MT">Montana (MT)</option>
+    <option value="NE">Nebraska (NE)</option>
+    <option value="NV">Nevada (NV)</option>
+    <option value="NH">New Hampshire (NH)</option>
+    <option value="NJ">New Jersey (NJ)</option>
+    <option value="NM">New Mexico (NM)</option>
+    <option value="NY">New York (NY)</option>
+    <option value="NC">North Carolina (NC)</option>
+    <option value="ND">North Dakota (ND)</option>
+    <option value="OH">Ohio (OH)</option>
+    <option value="OK">Oklahoma (OK)</option>
+    <option value="OR">Oregon (OR)</option>
+    <option value="PA">Pennsylvania (PA)</option>
+    <option value="RI">Rhode Island (RI)</option>
+    <option value="SC">South Carolina (SC)</option>
+    <option value="SD">South Dakota (SD)</option>
+    <option value="TN">Tennessee (TN)</option>
+    <option value="TX">Texas (TX)</option>
+    <option value="UT">Utah (UT)</option>
+    <option value="VT">Vermont (VT)</option>
+    <option value="VA">Virginia (VA)</option>
+    <option value="WA">Washington (WA)</option>
+    <option value="WV">West Virginia (WV)</option>
+    <option value="WI">Wisconsin (WI)</option>
+    <option value="WY">Wyoming (WY)</option>
+  </select>
+
+  <label>ZIP Code<span class="required-star">*</span></label>
+  <input type="text" name="zip" required />
+
+  <label>Phone Number<span class="required-star">*</span></label>
+  <input type="text" name="phone" required />
+
+  <label>Package Weight<span class="required-star">*</span></label>
+  <select name="deviceType" required>
+    <option value="">Select Weight</option>
     <option value="1 lb Device|1">1 lb</option>
     <option value="2 lb Device|2">2 lb</option>
     <option value="3 lb Device|3">3 lb</option>
@@ -54,12 +147,9 @@
     <option value="10 lb Device|10">10 lb</option>
   </select>
 
-  <div class="note">
-    Note: Processing may take 1–2 minutes. Please do not refresh.
-  </div>
-
   <button type="submit" id="submitBtn">Mail My Return Label</button>
   <div id="message"></div>
+
 </form>
 
 <script>
@@ -71,26 +161,11 @@
     return String(str)
       .replaceAll("&", "&amp;")
       .replaceAll("<", "&lt;")
-      .replaceAll(">", "&gt;")
-      .replaceAll('"', "&quot;")
-      .replaceAll("'", "&#039;");
-  }
-
-  function formatVerifiedAddress(addr) {
-    // addr = { name, address_line1, address_line2, city, state, zip }
-    if (!addr) return "";
-    const lines = [];
-    if (addr.name) lines.push(escapeHtml(addr.name));
-    if (addr.address_line1) lines.push(escapeHtml(addr.address_line1));
-    if (addr.address_line2) lines.push(escapeHtml(addr.address_line2));
-    const lastLine = [addr.city, addr.state, addr.zip].filter(Boolean).map(escapeHtml).join(", ").replace(", ,", ",");
-    if (lastLine.trim()) lines.push(lastLine);
-    return lines.join("<br>");
+      .replaceAll(">", "&gt;");
   }
 
   form.addEventListener("submit", async function(e) {
     e.preventDefault();
-
     messageDiv.innerHTML = "";
     messageDiv.className = "";
 
@@ -101,16 +176,10 @@
       const formData = new FormData(form);
       const data = Object.fromEntries(formData.entries());
 
-      // Parse "Label|WeightLbs" and compute weightOz
-      const raw = (data.deviceType || "").toString().trim();
-      if (!raw) throw new Error("Please select a package weight.");
-
+      const raw = data.deviceType;
       const [deviceTypeLabel, weightLbsStr] = raw.split("|");
-      const weightLbs = Number(weightLbsStr || 2);
-      const weightOz = weightLbs * 16;
-
-      data.deviceType = deviceTypeLabel;  // keep field name create-label expects
-      data.weightOz = weightOz;
+      data.deviceType = deviceTypeLabel;
+      data.weightOz = Number(weightLbsStr) * 16;
 
       const response = await fetch("/api/mail-label", {
         method: "POST",
@@ -118,30 +187,17 @@
         body: JSON.stringify(data)
       });
 
-      const result = await response.json().catch(() => null);
+      const result = await response.json();
 
-      if (!response.ok || !result?.ok) {
-        const detail = result?.details ? ` | ${JSON.stringify(result.details)}` : "";
-        throw new Error((result?.error || "Request failed") + detail);
+      if (!response.ok || !result.ok) {
+        throw new Error(result.error || "Request failed");
       }
-
-      const deliverability = result.addressDeliverability ? escapeHtml(result.addressDeliverability) : "";
-      const verifiedBlock = result.addressStandardized
-        ? `
-          <div class="box">
-            <b>Verified Mailing Address</b><br>
-            ${formatVerifiedAddress(result.addressStandardized)}
-            ${deliverability ? `<div class="muted">Deliverability: ${deliverability}</div>` : ""}
-          </div>
-        `
-        : "";
 
       messageDiv.className = "success";
       messageDiv.innerHTML = `
         Success! Your return label and instructions have been mailed.<br><br>
-        ${result.uspsTrackingNumber ? "USPS Tracking: " + escapeHtml(result.uspsTrackingNumber) + "<br>" : ""}
-        ${result.lobLetterId ? "Mail Tracking ID: " + escapeHtml(result.lobLetterId) : ""}
-        ${verifiedBlock}
+        USPS Tracking: ${escapeHtml(result.uspsTrackingNumber)}<br>
+        Mail Tracking ID: ${escapeHtml(result.lobLetterId)}
       `;
 
       form.reset();
