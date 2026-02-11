@@ -17,8 +17,10 @@ function getBaseUrl(req) {
 
 function requireField(body, key) {
   const v = body?.[key];
-  if (!v || typeof v !== "string" || !v.trim()) return null;
-  return v.trim();
+  if (v === undefined || v === null) return null;
+  const s = String(v).trim();
+  if (!s) return null;
+  return s;
 }
 
 async function buildInstructionsPlusLabelPdf({ labelBase64 }) {
@@ -30,19 +32,12 @@ async function buildInstructionsPlusLabelPdf({ labelBase64 }) {
   const out = await PDFDocument.create();
 
   // 1) Add your existing power-off instructions PDF as page(s), if present
-  // (You already have power-off-instructions.pdf in repo root.)
   const instructionsPath = path.join(process.cwd(), "power-off-instructions.pdf");
   if (fs.existsSync(instructionsPath)) {
     const instrBytes = fs.readFileSync(instructionsPath);
     const instrPdf = await PDFDocument.load(instrBytes);
-    const instrPages = await out.copyPages(
-      instrPdf,
-      instrPdf.getPageIndices() // copies all pages
-    );
+    const instrPages = await out.copyPages(instrPdf, instrPdf.getPageIndices());
     instrPages.forEach((p) => out.addPage(p));
-  } else {
-    // If file is missing, still continue (you can add a real PDF later)
-    // but Lob will print only the label page.
   }
 
   // 2) Add a letter-sized page and place the 4x6 label on it
@@ -75,12 +70,18 @@ export default async function handler(req, res) {
       return sendJson(res, 405, { ok: false, error: "Method Not Allowed" });
     }
 
+    // Vercel sometimes passes req.body as an object, sometimes as a string
+    const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
+
+    // 🔐 Access code check (server-side enforcement)
+    const accessCode = requireField(body, "accessCode");
+    if (accessCode !== "072288") {
+      return sendJson(res, 403, { ok: false, error: "Invalid access code" });
+    }
+
     if (!process.env.LOB_API_KEY) {
       return sendJson(res, 500, { ok: false, error: "Missing LOB_API_KEY env var" });
     }
-
-    // Vercel sometimes passes req.body as an object, sometimes as a string
-    const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
 
     // Required address fields (to mail the letter to the customer)
     const name = requireField(body, "name");
@@ -101,6 +102,7 @@ export default async function handler(req, res) {
     const labelResp = await fetch(`${baseUrl}/api/create-label`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      // Pass through all fields (including deviceType, etc.)
       body: JSON.stringify(body),
     });
 
@@ -114,7 +116,7 @@ export default async function handler(req, res) {
       });
     }
 
-    // 2) Build a 2-part printable PDF: instructions + label page
+    // 2) Build a printable PDF: instructions + label page
     const combinedPdfBuffer = await buildInstructionsPlusLabelPdf({
       labelBase64: labelJson.labelData,
     });
@@ -130,7 +132,7 @@ export default async function handler(req, res) {
     form.set("to[address_state]", state);
     form.set("to[address_zip]", zip);
 
-    // FROM = your return program (set these in Vercel env vars or defaults here)
+    // FROM = your return program (set these in Vercel env vars or use defaults here)
     form.set("from[name]", process.env.LOB_FROM_NAME || "Connect America Returns");
     form.set("from[address_line1]", process.env.LOB_FROM_ADDRESS1 || "3 Bala Plaza West");
     form.set("from[address_city]", process.env.LOB_FROM_CITY || "Bala Cynwyd");
