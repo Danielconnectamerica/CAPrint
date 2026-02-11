@@ -4,49 +4,19 @@
   <meta charset="UTF-8" />
   <title>Connect America Return Label</title>
   <style>
-    body {
-      font-family: Arial, sans-serif;
-      max-width: 600px;
-      margin: 40px auto;
-    }
-
-    input, select, button {
-      width: 100%;
-      padding: 10px;
-      margin: 8px 0;
-      font-size: 16px;
-    }
-
-    button {
-      background-color: #0055A5;
-      color: white;
-      border: none;
-      cursor: pointer;
-    }
-
-    button:disabled {
-      background-color: #999;
-      cursor: not-allowed;
-    }
-
-    .error {
-      color: red;
-      font-weight: bold;
-    }
-
-    .success {
-      color: green;
-      font-weight: bold;
-    }
+    body { font-family: Arial, sans-serif; max-width: 600px; margin: 40px auto; }
+    input, select, button { width: 100%; padding: 10px; margin: 8px 0; font-size: 16px; }
+    button { background-color: #0055A5; color: white; border: none; cursor: pointer; }
+    button:disabled { background-color: #999; cursor: not-allowed; }
+    .error { color: red; font-weight: bold; }
+    .success { color: green; font-weight: bold; }
   </style>
 </head>
-
 <body>
 
 <h2>Request a Physical Return Label</h2>
 
 <form id="returnForm">
-
   <input type="text" name="name" placeholder="Full Name" required />
   <input type="text" name="address1" placeholder="Street Address" required />
   <input type="text" name="address2" placeholder="Apartment / Suite (Optional)" />
@@ -60,13 +30,8 @@
     <option value="2">2 lb Device</option>
   </select>
 
-  <!-- 🔐 Access Code Field (IMPORTANT: must have name="accessCode") -->
-  <input type="password" id="accessCode" name="accessCode" placeholder="Enter Access Code" required />
-
   <button type="submit" id="submitBtn">Mail My Return Label</button>
-
   <div id="message"></div>
-
 </form>
 
 <script>
@@ -80,15 +45,6 @@
     messageDiv.innerHTML = "";
     messageDiv.className = "";
 
-    const accessCode = document.getElementById("accessCode").value.trim();
-
-    // 🔐 Access Code Validation (client-side)
-    if (accessCode !== "072288") {
-      messageDiv.className = "error";
-      messageDiv.innerHTML = "Invalid access code.";
-      return;
-    }
-
     submitBtn.disabled = true;
     submitBtn.innerText = "Processing... Please wait";
 
@@ -99,13 +55,15 @@
       const response = await fetch("/api/mail-label", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        // NOTE: No access code is sent from the browser.
         body: JSON.stringify(data)
       });
 
-      const result = await response.json();
+      // If auth fails, browser will prompt for username/password automatically.
+      const result = await response.json().catch(() => null);
 
-      if (!result.ok) {
-        throw new Error(result.error || "Something went wrong");
+      if (!response.ok || !result?.ok) {
+        throw new Error(result?.error || "Request failed");
       }
 
       messageDiv.className = "success";
