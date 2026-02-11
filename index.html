@@ -5,13 +5,15 @@
   <title>Connect America Return Label</title>
   <style>
     body { font-family: Arial, sans-serif; max-width: 600px; margin: 40px auto; }
-    input, select, button { width: 100%; padding: 10px; margin: 8px 0; font-size: 16px; }
+    input, select, button { width: 100%; padding: 10px; margin: 8px 0; font-size: 16px; box-sizing: border-box; }
     button { background-color: #0055A5; color: white; border: none; cursor: pointer; }
     button:disabled { background-color: #999; cursor: not-allowed; }
     .error { color: red; font-weight: bold; }
     .success { color: green; font-weight: bold; }
+    .note { font-size: 13px; color: #444; margin-top: 8px; }
   </style>
 </head>
+
 <body>
 
 <h2>Request a Physical Return Label</h2>
@@ -21,14 +23,22 @@
   <input type="text" name="address1" placeholder="Street Address" required />
   <input type="text" name="address2" placeholder="Apartment / Suite (Optional)" />
   <input type="text" name="city" placeholder="City" required />
-  <input type="text" name="state" placeholder="State (e.g. PA)" required />
+  <input type="text" name="state" placeholder="State (e.g. NJ)" required />
   <input type="text" name="zip" placeholder="ZIP Code" required />
 
-  <select name="deviceType" required>
+  <!-- ✅ REQUIRED by /api/create-label.js -->
+  <input type="text" name="phone" placeholder="Phone Number" required />
+
+  <!-- deviceType value format: "Label|WeightLbs" -->
+  <select name="deviceType" id="deviceType" required>
     <option value="">Select Device Type</option>
-    <option value="1">1 lb Device</option>
-    <option value="2">2 lb Device</option>
+    <option value="1 lb Device|1">1 lb Device</option>
+    <option value="2 lb Device|2">2 lb Device</option>
   </select>
+
+  <div class="note">
+    Note: Processing may take 1–2 minutes. Please do not refresh.
+  </div>
 
   <button type="submit" id="submitBtn">Mail My Return Label</button>
   <div id="message"></div>
@@ -48,22 +58,35 @@
     submitBtn.disabled = true;
     submitBtn.innerText = "Processing... Please wait";
 
-    const formData = new FormData(form);
-    const data = Object.fromEntries(formData.entries());
-
     try {
+      // Build data from form
+      const formData = new FormData(form);
+      const data = Object.fromEntries(formData.entries());
+
+      // ✅ Match your original app behavior: parse deviceType + compute weightOz
+      const raw = (data.deviceType || "").toString().trim();
+      if (!raw) throw new Error("Please select a Device Type.");
+
+      const [deviceTypeLabel, weightLbsStr] = raw.split("|");
+      const weightLbs = Number(weightLbsStr || 2);
+      const weightOz = weightLbs * 16;
+
+      data.deviceType = deviceTypeLabel;  // create-label requires "deviceType"
+      data.weightOz = weightOz;           // helps normalizeWeightOz() in create-label
+
       const response = await fetch("/api/mail-label", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        // NOTE: No access code is sent from the browser.
         body: JSON.stringify(data)
       });
 
-      // If auth fails, browser will prompt for username/password automatically.
+      // If auth fails, browser will prompt automatically (Basic Auth)
       const result = await response.json().catch(() => null);
 
       if (!response.ok || !result?.ok) {
-        throw new Error(result?.error || "Request failed");
+        // show deeper details if present
+        const detail = result?.details ? ` | ${JSON.stringify(result.details)}` : "";
+        throw new Error((result?.error || "Request failed") + detail);
       }
 
       messageDiv.className = "success";
