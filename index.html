@@ -60,8 +60,8 @@
     <option value="2">2 lb Device</option>
   </select>
 
-  <!-- 🔐 Access Code Field -->
-  <input type="password" id="accessCode" placeholder="Enter Access Code" required />
+  <!-- 🔐 Access Code Field (IMPORTANT: must have name="accessCode") -->
+  <input type="password" id="accessCode" name="accessCode" placeholder="Enter Access Code" required />
 
   <button type="submit" id="submitBtn">Mail My Return Label</button>
 
@@ -82,7 +82,7 @@
 
     const accessCode = document.getElementById("accessCode").value.trim();
 
-    // 🔐 Access Code Validation
+    // 🔐 Access Code Validation (client-side)
     if (accessCode !== "072288") {
       messageDiv.className = "error";
       messageDiv.innerHTML = "Invalid access code.";
@@ -93,15 +93,12 @@
     submitBtn.innerText = "Processing... Please wait";
 
     const formData = new FormData(form);
-
     const data = Object.fromEntries(formData.entries());
 
     try {
       const response = await fetch("/api/mail-label", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data)
       });
 
@@ -119,7 +116,6 @@
       `;
 
       form.reset();
-
     } catch (err) {
       messageDiv.className = "error";
       messageDiv.innerHTML = "Error: " + err.message;
