@@ -4,13 +4,24 @@
   <meta charset="UTF-8" />
   <title>Connect America Return Label</title>
   <style>
-    body { font-family: Arial, sans-serif; max-width: 600px; margin: 40px auto; }
+    body { font-family: Arial, sans-serif; max-width: 650px; margin: 40px auto; }
     input, select, button { width: 100%; padding: 10px; margin: 8px 0; font-size: 16px; box-sizing: border-box; }
     button { background-color: #0055A5; color: white; border: none; cursor: pointer; }
     button:disabled { background-color: #999; cursor: not-allowed; }
     .error { color: red; font-weight: bold; }
     .success { color: green; font-weight: bold; }
     .note { font-size: 13px; color: #444; margin-top: 8px; }
+    .box {
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      padding: 12px;
+      margin-top: 12px;
+      background: #fafafa;
+      font-size: 14px;
+      line-height: 1.4;
+    }
+    .box b { display: inline-block; margin-bottom: 6px; }
+    .muted { color: #666; font-size: 13px; }
   </style>
 </head>
 
@@ -26,14 +37,21 @@
   <input type="text" name="state" placeholder="State (e.g. NJ)" required />
   <input type="text" name="zip" placeholder="ZIP Code" required />
 
-  <!-- ✅ REQUIRED by /api/create-label.js -->
   <input type="text" name="phone" placeholder="Phone Number" required />
 
   <!-- deviceType value format: "Label|WeightLbs" -->
   <select name="deviceType" id="deviceType" required>
-    <option value="">Select Device Type</option>
-    <option value="1 lb Device|1">1 lb Device</option>
-    <option value="2 lb Device|2">2 lb Device</option>
+    <option value="">Select Package Weight</option>
+    <option value="1 lb Device|1">1 lb</option>
+    <option value="2 lb Device|2">2 lb</option>
+    <option value="3 lb Device|3">3 lb</option>
+    <option value="4 lb Device|4">4 lb</option>
+    <option value="5 lb Device|5">5 lb</option>
+    <option value="6 lb Device|6">6 lb</option>
+    <option value="7 lb Device|7">7 lb</option>
+    <option value="8 lb Device|8">8 lb</option>
+    <option value="9 lb Device|9">9 lb</option>
+    <option value="10 lb Device|10">10 lb</option>
   </select>
 
   <div class="note">
@@ -49,6 +67,27 @@
   const messageDiv = document.getElementById("message");
   const submitBtn = document.getElementById("submitBtn");
 
+  function escapeHtml(str) {
+    return String(str)
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
+  }
+
+  function formatVerifiedAddress(addr) {
+    // addr = { name, address_line1, address_line2, city, state, zip }
+    if (!addr) return "";
+    const lines = [];
+    if (addr.name) lines.push(escapeHtml(addr.name));
+    if (addr.address_line1) lines.push(escapeHtml(addr.address_line1));
+    if (addr.address_line2) lines.push(escapeHtml(addr.address_line2));
+    const lastLine = [addr.city, addr.state, addr.zip].filter(Boolean).map(escapeHtml).join(", ").replace(", ,", ",");
+    if (lastLine.trim()) lines.push(lastLine);
+    return lines.join("<br>");
+  }
+
   form.addEventListener("submit", async function(e) {
     e.preventDefault();
 
@@ -59,20 +98,19 @@
     submitBtn.innerText = "Processing... Please wait";
 
     try {
-      // Build data from form
       const formData = new FormData(form);
       const data = Object.fromEntries(formData.entries());
 
-      // ✅ Match your original app behavior: parse deviceType + compute weightOz
+      // Parse "Label|WeightLbs" and compute weightOz
       const raw = (data.deviceType || "").toString().trim();
-      if (!raw) throw new Error("Please select a Device Type.");
+      if (!raw) throw new Error("Please select a package weight.");
 
       const [deviceTypeLabel, weightLbsStr] = raw.split("|");
       const weightLbs = Number(weightLbsStr || 2);
       const weightOz = weightLbs * 16;
 
-      data.deviceType = deviceTypeLabel;  // create-label requires "deviceType"
-      data.weightOz = weightOz;           // helps normalizeWeightOz() in create-label
+      data.deviceType = deviceTypeLabel;  // keep field name create-label expects
+      data.weightOz = weightOz;
 
       const response = await fetch("/api/mail-label", {
         method: "POST",
@@ -80,26 +118,36 @@
         body: JSON.stringify(data)
       });
 
-      // If auth fails, browser will prompt automatically (Basic Auth)
       const result = await response.json().catch(() => null);
 
       if (!response.ok || !result?.ok) {
-        // show deeper details if present
         const detail = result?.details ? ` | ${JSON.stringify(result.details)}` : "";
         throw new Error((result?.error || "Request failed") + detail);
       }
 
+      const deliverability = result.addressDeliverability ? escapeHtml(result.addressDeliverability) : "";
+      const verifiedBlock = result.addressStandardized
+        ? `
+          <div class="box">
+            <b>Verified Mailing Address</b><br>
+            ${formatVerifiedAddress(result.addressStandardized)}
+            ${deliverability ? `<div class="muted">Deliverability: ${deliverability}</div>` : ""}
+          </div>
+        `
+        : "";
+
       messageDiv.className = "success";
       messageDiv.innerHTML = `
         Success! Your return label and instructions have been mailed.<br><br>
-        ${result.uspsTrackingNumber ? "USPS Tracking: " + result.uspsTrackingNumber + "<br>" : ""}
-        ${result.lobLetterId ? "Mail Tracking ID: " + result.lobLetterId : ""}
+        ${result.uspsTrackingNumber ? "USPS Tracking: " + escapeHtml(result.uspsTrackingNumber) + "<br>" : ""}
+        ${result.lobLetterId ? "Mail Tracking ID: " + escapeHtml(result.lobLetterId) : ""}
+        ${verifiedBlock}
       `;
 
       form.reset();
     } catch (err) {
       messageDiv.className = "error";
-      messageDiv.innerHTML = "Error: " + err.message;
+      messageDiv.innerHTML = "Error: " + escapeHtml(err.message);
     }
 
     submitBtn.disabled = false;
