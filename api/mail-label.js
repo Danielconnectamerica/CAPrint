@@ -178,7 +178,7 @@ export default async function handler(req, res) {
     form.set("from[address_zip]", process.env.LOB_FROM_ZIP || "19004");
 
     form.set("color", "true");
-
+    form.set("mail_use_type", "operational");
     form.set(
       "file",
       new Blob([combinedPdfBuffer], { type: "application/pdf" }),
