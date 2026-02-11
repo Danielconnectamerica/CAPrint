@@ -47,13 +47,17 @@ function requireField(body, key) {
   return s;
 }
 
+/**
+ * Builds a printable PDF:
+ * - Includes repo-root power-off-instructions.pdf (all pages) if present
+ * - Appends a letter-sized page with the 4x6 return label embedded and centered
+ */
 async function buildInstructionsPlusLabelPdf({ labelBase64 }) {
   const labelBytes = Buffer.from(labelBase64, "base64");
-  const labelPdf = await PDFDocument.load(labelBytes);
 
   const out = await PDFDocument.create();
 
-  // instructions PDF at repo root
+  // 1) Add instructions PDF if present
   const instructionsPath = path.join(process.cwd(), "power-off-instructions.pdf");
   if (fs.existsSync(instructionsPath)) {
     const instrBytes = fs.readFileSync(instructionsPath);
@@ -62,24 +66,26 @@ async function buildInstructionsPlusLabelPdf({ labelBase64 }) {
     instrPages.forEach((p) => out.addPage(p));
   }
 
-  // letter-sized label page
-  const LETTER_W = 612;
-  const LETTER_H = 792;
-  const labelLetterPage = out.addPage([LETTER_W, LETTER_H]);
+  // 2) Add letter page and embed label PDF page 0
+  const LETTER_W = 612; // 8.5" * 72
+  const LETTER_H = 792; // 11" * 72
+  const page = out.addPage([LETTER_W, LETTER_H]);
 
-  const [labelPage] = await out.copyPages(labelPdf, [0]);
+  // ✅ embedPdf returns PDFEmbeddedPage(s) that drawPage() accepts
+  const [embeddedLabel] = await out.embedPdf(labelBytes, [0]);
 
+  // Fit label onto letter
   const targetW = 420;
   const targetH = 600;
 
-  const scale = Math.min(targetW / labelPage.getWidth(), targetH / labelPage.getHeight());
-  const drawW = labelPage.getWidth() * scale;
-  const drawH = labelPage.getHeight() * scale;
+  const scale = Math.min(targetW / embeddedLabel.width, targetH / embeddedLabel.height);
+  const drawW = embeddedLabel.width * scale;
+  const drawH = embeddedLabel.height * scale;
 
   const x = (LETTER_W - drawW) / 2;
   const y = (LETTER_H - drawH) / 2;
 
-  labelLetterPage.drawPage(labelPage, { x, y, xScale: scale, yScale: scale });
+  page.drawPage(embeddedLabel, { x, y, xScale: scale, yScale: scale });
 
   const outBytes = await out.save();
   return Buffer.from(outBytes);
@@ -91,7 +97,7 @@ export default async function handler(req, res) {
       return sendJson(res, 405, { ok: false, error: "Method Not Allowed" });
     }
 
-    // Basic Auth gate
+    // ✅ BASIC AUTH GATE
     const creds = parseBasicAuth(req);
     const expectedUser = process.env.MAIL_USER || "";
     const expectedPass = process.env.MAIL_PASS || "";
@@ -102,6 +108,7 @@ export default async function handler(req, res) {
       return unauthorized(res);
     }
 
+    // Parse body
     const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
 
     if (!process.env.LOB_API_KEY) {
@@ -130,7 +137,7 @@ export default async function handler(req, res) {
       return sendJson(res, 400, { ok: false, error: `Missing required fields: ${missing.join(", ")}` });
     }
 
-    // 1) Create USPS label via your existing route
+    // 1) Generate USPS label via your existing endpoint
     const baseUrl = getBaseUrl(req);
     const labelResp = await fetch(`${baseUrl}/api/create-label`, {
       method: "POST",
@@ -141,7 +148,6 @@ export default async function handler(req, res) {
     const labelJson = await labelResp.json().catch(() => null);
 
     if (!labelResp.ok || !labelJson?.ok || !labelJson?.labelData) {
-      // return full details so you can see exact Endicia error in UI
       return sendJson(res, 400, {
         ok: false,
         error: "Label creation failed",
