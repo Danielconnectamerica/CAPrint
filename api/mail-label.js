@@ -9,6 +9,34 @@ function sendJson(res, status, obj) {
   res.end(JSON.stringify(obj));
 }
 
+function unauthorized(res) {
+  // This triggers the browser’s built-in username/password prompt
+  res.statusCode = 401;
+  res.setHeader("WWW-Authenticate", 'Basic realm="Return Label Mailer"');
+  res.end("Unauthorized");
+}
+
+function parseBasicAuth(req) {
+  const header = req.headers.authorization || req.headers.Authorization;
+  if (!header || !header.toString().startsWith("Basic ")) return null;
+
+  const b64 = header.toString().slice("Basic ".length).trim();
+  let decoded = "";
+  try {
+    decoded = Buffer.from(b64, "base64").toString("utf8");
+  } catch {
+    return null;
+  }
+
+  const idx = decoded.indexOf(":");
+  if (idx === -1) return null;
+
+  return {
+    user: decoded.slice(0, idx),
+    pass: decoded.slice(idx + 1),
+  };
+}
+
 function getBaseUrl(req) {
   const proto = req.headers["x-forwarded-proto"] || "https";
   const host = req.headers.host;
@@ -24,14 +52,12 @@ function requireField(body, key) {
 }
 
 async function buildInstructionsPlusLabelPdf({ labelBase64 }) {
-  // Load the USPS label PDF (base64 from Endicia)
   const labelBytes = Buffer.from(labelBase64, "base64");
   const labelPdf = await PDFDocument.load(labelBytes);
 
-  // Create output PDF
   const out = await PDFDocument.create();
 
-  // 1) Add your existing power-off instructions PDF as page(s), if present
+  // Add instructions PDF if present at repo root: power-off-instructions.pdf
   const instructionsPath = path.join(process.cwd(), "power-off-instructions.pdf");
   if (fs.existsSync(instructionsPath)) {
     const instrBytes = fs.readFileSync(instructionsPath);
@@ -40,14 +66,13 @@ async function buildInstructionsPlusLabelPdf({ labelBase64 }) {
     instrPages.forEach((p) => out.addPage(p));
   }
 
-  // 2) Add a letter-sized page and place the 4x6 label on it
-  const LETTER_W = 612; // 8.5" * 72
-  const LETTER_H = 792; // 11" * 72
+  // Add a letter-sized page for the 4x6 label
+  const LETTER_W = 612;
+  const LETTER_H = 792;
   const labelLetterPage = out.addPage([LETTER_W, LETTER_H]);
 
   const [labelPage] = await out.copyPages(labelPdf, [0]);
 
-  // Scale label to fit nicely on letter
   const targetW = 420;
   const targetH = 600;
 
@@ -70,20 +95,27 @@ export default async function handler(req, res) {
       return sendJson(res, 405, { ok: false, error: "Method Not Allowed" });
     }
 
-    // Vercel sometimes passes req.body as an object, sometimes as a string
-    const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
+    // ✅ BASIC AUTH GATE (no secret in HTML)
+    const creds = parseBasicAuth(req);
+    const expectedUser = process.env.MAIL_USER || "";
+    const expectedPass = process.env.MAIL_PASS || "";
 
-    // 🔐 Access code check (server-side enforcement)
-    const accessCode = requireField(body, "accessCode");
-    if (accessCode !== "072288") {
-      return sendJson(res, 403, { ok: false, error: "Invalid access code" });
+    if (!expectedUser || !expectedPass) {
+      return sendJson(res, 500, { ok: false, error: "Missing MAIL_USER/MAIL_PASS env vars" });
     }
+
+    if (!creds || creds.user !== expectedUser || creds.pass !== expectedPass) {
+      return unauthorized(res);
+    }
+
+    // Body parsing
+    const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
 
     if (!process.env.LOB_API_KEY) {
       return sendJson(res, 500, { ok: false, error: "Missing LOB_API_KEY env var" });
     }
 
-    // Required address fields (to mail the letter to the customer)
+    // Required address fields (mail to customer-entered address)
     const name = requireField(body, "name");
     const address1 = requireField(body, "address1");
     const city = requireField(body, "city");
@@ -97,12 +129,11 @@ export default async function handler(req, res) {
       });
     }
 
-    // 1) Generate the USPS return label using your existing route
+    // 1) Generate USPS label via your existing endpoint
     const baseUrl = getBaseUrl(req);
     const labelResp = await fetch(`${baseUrl}/api/create-label`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      // Pass through all fields (including deviceType, etc.)
       body: JSON.stringify(body),
     });
 
@@ -116,15 +147,14 @@ export default async function handler(req, res) {
       });
     }
 
-    // 2) Build a printable PDF: instructions + label page
+    // 2) Build PDF (instructions + label)
     const combinedPdfBuffer = await buildInstructionsPlusLabelPdf({
       labelBase64: labelJson.labelData,
     });
 
-    // 3) Create a Lob Letter to mail it to the customer-entered address
+    // 3) Create Lob letter
     const form = new FormData();
 
-    // TO = customer address entered on the form
     form.set("to[name]", name);
     form.set("to[address_line1]", address1);
     if (body.address2) form.set("to[address_line2]", String(body.address2));
@@ -132,17 +162,14 @@ export default async function handler(req, res) {
     form.set("to[address_state]", state);
     form.set("to[address_zip]", zip);
 
-    // FROM = your return program (set these in Vercel env vars or use defaults here)
     form.set("from[name]", process.env.LOB_FROM_NAME || "Connect America Returns");
     form.set("from[address_line1]", process.env.LOB_FROM_ADDRESS1 || "3 Bala Plaza West");
     form.set("from[address_city]", process.env.LOB_FROM_CITY || "Bala Cynwyd");
     form.set("from[address_state]", process.env.LOB_FROM_STATE || "PA");
     form.set("from[address_zip]", process.env.LOB_FROM_ZIP || "19004");
 
-    // Optional settings
     form.set("color", "true");
 
-    // Attach combined PDF (multipart upload)
     form.set(
       "file",
       new Blob([combinedPdfBuffer], { type: "application/pdf" }),
@@ -167,7 +194,6 @@ export default async function handler(req, res) {
       });
     }
 
-    // 4) Return success response (USPS tracking + Lob tracking)
     return sendJson(res, 200, {
       ok: true,
       uspsTrackingNumber: labelJson.trackingNumber || null,
