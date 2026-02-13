@@ -15,12 +15,12 @@ const SHEETS_WEBHOOK_URL = process.env.SHEETS_WEBHOOK_URL || "";
 // Hardcoded returns warehouse (destination)
 const RETURN_TO = {
   name: "Return Warehouse",
-  company_name: "Lifeline",
-  address_line1: "110 Southchase Blvd",
+  company_name: "Connect America Returns",
+  address_line1: "816 Park Way",
   address_line2: "",
-  city: "Fountain Inn",
-  state_province: "SC",
-  postal_code: "29644",
+  city: "Broomall",
+  state_province: "PA",
+  postal_code: "19008",
   country_code: "US",
   phone: "8002862622",
   email: ""
@@ -200,7 +200,7 @@ module.exports = async (req, res) => {
 
     // Best-effort Google Sheets logging
     const sheetsPayload = {
-      source: "causps.vercel.app",
+      source: "Connect Print",
       created_at_iso: new Date().toISOString(),
 
       // customer inputs
