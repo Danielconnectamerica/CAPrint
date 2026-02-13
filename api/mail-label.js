@@ -245,7 +245,7 @@ export default async function handler(req, res) {
 
     form.set(
       "from[name]",
-      process.env.LOB_FROM_NAME || "Lifeline"
+      process.env.LOB_FROM_NAME || "Connect America"
     );
     form.set(
       "from[address_line1]",
