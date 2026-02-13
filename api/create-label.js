@@ -1,6 +1,5 @@
 // /api/create-label.js
 // USPS Returns (Pay-On-Use) label via Stamps.com/Endicia SERA
-// SHIP TO / RETURN TO hardcoded: Kimberly Dracup, 816 Park Way, Broomall PA 19008
 // Weight: from dropdown (1 lb or 2 lb)
 
 const SIGNIN_BASE = process.env.SERA_SIGNIN_BASE || "https://signin.stampsendicia.com";
@@ -15,15 +14,15 @@ const SHEETS_WEBHOOK_URL = process.env.SHEETS_WEBHOOK_URL || "";
 // Hardcoded returns warehouse (destination)
 const RETURN_TO = {
   name: "Return Warehouse",
-  company_name: "Connect America Returns",
-  address_line1: "816 Park Way",
-  address_line2: "",
+  company_name: "CA Returns",
+  address_line1: "110 Southchase Blvd",
+  address_line2: "816 Parkway Drive",
   city: "Broomall",
   state_province: "PA",
   postal_code: "19008",
   country_code: "US",
   phone: "8002862622",
-  email: ""
+  email: "",
 };
 
 function json(res, status, obj) {
@@ -56,8 +55,8 @@ async function getAccessToken() {
       grant_type: "refresh_token",
       client_id: CLIENT_ID,
       client_secret: CLIENT_SECRET,
-      refresh_token: REFRESH_TOKEN
-    })
+      refresh_token: REFRESH_TOKEN,
+    }),
   });
 
   const data = await resp.json().catch(() => null);
@@ -88,7 +87,7 @@ function customerFromAddress(body) {
     postal_code: (body.zip || "").trim(),
     country_code: "US",
     phone: (body.phone || "").trim(),
-    email: (body.email || "").trim()
+    email: (body.email || "").trim(),
   };
 }
 
@@ -112,12 +111,14 @@ module.exports = async (req, res) => {
     if (!CLIENT_ID || !CLIENT_SECRET || !REFRESH_TOKEN) {
       return json(res, 500, {
         ok: false,
-        error: "Missing env vars: SERA_CLIENT_ID, SERA_CLIENT_SECRET, SERA_REFRESH_TOKEN."
+        error: "Missing env vars: SERA_CLIENT_ID, SERA_CLIENT_SECRET, SERA_REFRESH_TOKEN.",
       });
     }
 
-    const body =
-      typeof req.body === "string" ? JSON.parse(req.body || "{}") : (req.body || {});
+    const body = typeof req.body === "string" ? JSON.parse(req.body || "{}") : req.body || {};
+
+    // ✅ NEW: allow mail-label.js to call create-label.js without creating a SharePoint row
+    const skipLogging = body?.skipLogging === true;
 
     const required = ["name", "address1", "city", "state", "zip", "phone", "deviceType"];
     const missing = required.filter((k) => !String(body[k] || "").trim());
@@ -126,16 +127,23 @@ module.exports = async (req, res) => {
     }
 
     const from_address = customerFromAddress(body);
-    if (!from_address.name || !from_address.address_line1 || !from_address.city || !from_address.state_province || !from_address.postal_code) {
-      return json(res, 400, { ok: false, error: "From address incomplete (name, address, city, state, zip required)." });
+    if (
+      !from_address.name ||
+      !from_address.address_line1 ||
+      !from_address.city ||
+      !from_address.state_province ||
+      !from_address.postal_code
+    ) {
+      return json(res, 400, {
+        ok: false,
+        error: "From address incomplete (name, address, city, state, zip required).",
+      });
     }
 
     const weightOz = normalizeWeightOz(body);
-
     const accessToken = await getAccessToken();
 
     const payload = {
-      // RETURNS labels typically print merchant info; still send customer as from for record/eligibility
       from_address,
       ship_from_address: from_address,
       sender_address: from_address,
@@ -150,26 +158,25 @@ module.exports = async (req, res) => {
       package: {
         packaging_type: "package",
         weight: weightOz,
-        weight_unit: "ounce"
+        weight_unit: "ounce",
       },
 
       advanced_options: {
-        is_pay_on_use: true
+        is_pay_on_use: true,
       },
 
       label_options: {
         label_size: "4x6",
         label_format: "pdf",
-        label_output_type: "base64"
+        label_output_type: "base64",
       },
 
       references: {
-        reference1: (body.deviceSerial || "").trim(),     // optional
-        reference2: (body.returnReason || "").trim()      // optional
+        reference1: (body.deviceSerial || "").trim(),
+        reference2: (body.returnReason || "").trim(),
       },
 
-      // leave false unless Endicia instructs otherwise
-      is_test_label: false
+      is_test_label: false,
     };
 
     const idempotencyKey = uuidv4();
@@ -179,9 +186,9 @@ module.exports = async (req, res) => {
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${accessToken}`,
-        "Idempotency-Key": idempotencyKey
+        "Idempotency-Key": idempotencyKey,
       },
-      body: JSON.stringify(payload)
+      body: JSON.stringify(payload),
     });
 
     const labelData = await labelResp.json().catch(() => null);
@@ -191,43 +198,46 @@ module.exports = async (req, res) => {
         ok: false,
         error: "Label creation failed",
         httpStatus: labelResp.status,
-        details: labelData
+        details: labelData,
       });
     }
 
     const trackingNumber = labelData.tracking_number || "";
     const maybeBase64 = labelData.labels?.[0]?.label_data || labelData.label_data || null;
 
-    // Best-effort Google Sheets logging
-    const sheetsPayload = {
-      source: "Connect Print",
-      created_at_iso: new Date().toISOString(),
+    // ✅ UPDATED: SharePoint logging is optional
+    let sheetsLogged = null;
 
-      // customer inputs
-      customer_name: from_address.name,
-      customer_email: from_address.email,
-      customer_phone: from_address.phone,
-      from_address1: from_address.address_line1,
-      from_address2: from_address.address_line2,
-      from_city: from_address.city,
-      from_state: from_address.state_province,
-      from_zip: from_address.postal_code,
+    if (!skipLogging) {
+      const sheetsPayload = {
+        request_id: idempotencyKey,
+        source: "CA Print",
+        created_at_iso: new Date().toISOString(),
 
-      // device + weight
-      device_type: String(body.deviceType || ""),
-      device_serial: String(body.deviceSerial || ""),
-      return_reason: String(body.returnReason || ""),
-      weight_oz: weightOz,
+        customer_name: from_address.name,
+        customer_email: from_address.email,
+        customer_phone: from_address.phone,
+        from_address1: from_address.address_line1,
+        from_address2: from_address.address_line2,
+        from_city: from_address.city,
+        from_state: from_address.state_province,
+        from_zip: from_address.postal_code,
 
-      // label outputs
-      service_type: labelData.service_type || "usps_ground_advantage",
-      tracking_number: trackingNumber,
-      label_id: labelData.label_id || "",
-      postage_total_usd: labelData?.shipment_cost?.total_amount ?? null,
-      status: "Created"
-    };
+        device_type: String(body.deviceType || ""),
+        device_serial: String(body.deviceSerial || ""),
+        return_reason: String(body.returnReason || ""),
+        weight_oz: weightOz,
 
-    const sheetsLogged = await postToSheets(SHEETS_WEBHOOK_URL, sheetsPayload);
+        service_type: labelData.service_type || "usps_ground_advantage",
+        tracking_number: trackingNumber,
+        label_id: labelData.label_id || "",
+        postage_total_usd: labelData?.shipment_cost?.total_amount ?? null,
+
+        status: "Created",
+      };
+
+      sheetsLogged = await postToSheets(SHEETS_WEBHOOK_URL, sheetsPayload);
+    }
 
     if (maybeBase64) {
       return json(res, 200, {
@@ -236,14 +246,14 @@ module.exports = async (req, res) => {
         filename: "usps-pay-on-use-return-label.pdf",
         mimeType: "application/pdf",
         labelData: maybeBase64,
-        sheetsLogged
+        sheetsLogged,
       });
     }
 
     const labelHref = labelData.labels?.[0]?.href || "";
     if (labelHref) {
       const fileResp = await fetch(labelHref, {
-        headers: { Authorization: `Bearer ${accessToken}` }
+        headers: { Authorization: `Bearer ${accessToken}` },
       });
       const buf = Buffer.from(await fileResp.arrayBuffer());
       const base64 = buf.toString("base64");
@@ -254,16 +264,16 @@ module.exports = async (req, res) => {
         filename: "usps-pay-on-use-return-label.pdf",
         mimeType: "application/pdf",
         labelData: base64,
-        sheetsLogged
+        sheetsLogged,
       });
     }
 
     return json(res, 500, {
       ok: false,
       error: "Label created but no label data returned (unexpected response shape).",
-      raw: labelData
+      raw: labelData,
+      sheetsLogged,
     });
-
   } catch (e) {
     return json(res, 500, { ok: false, error: String(e) });
   }
