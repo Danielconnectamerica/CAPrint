@@ -1,25 +1,31 @@
 // /api/create-label.js
+
 // USPS Returns (Pay-On-Use) label via Stamps.com/Endicia SERA
+
 // Weight: from dropdown (1 lb or 2 lb)
 
 const SIGNIN_BASE = process.env.SERA_SIGNIN_BASE || "https://signin.stampsendicia.com";
+
 const API_BASE = process.env.SERA_API_BASE || "https://api.stampsendicia.com/sera";
 
 const CLIENT_ID = process.env.SERA_CLIENT_ID;
+
 const CLIENT_SECRET = process.env.SERA_CLIENT_SECRET;
+
 const REFRESH_TOKEN = process.env.SERA_REFRESH_TOKEN;
 
 const SHEETS_WEBHOOK_URL = process.env.SHEETS_WEBHOOK_URL || "";
 
 // Hardcoded returns warehouse (destination)
+
 const RETURN_TO = {
   name: "Return Warehouse",
-  company_name: "CA Returns",
+  company_name: "Lifeline Returns",
   address_line1: "110 Southchase Blvd",
-  address_line2: "816 Parkway Drive",
-  city: "Broomall",
-  state_province: "PA",
-  postal_code: "19008",
+  address_line2: "",
+  city: "Fountain Inn",
+  state_province: "SC",
+  postal_code: "29644",
   country_code: "US",
   phone: "8002862622",
   email: "",
@@ -33,12 +39,14 @@ function json(res, status, obj) {
 
 async function postToSheets(webhookUrl, payload) {
   if (!webhookUrl) return null;
+
   try {
     const r = await fetch(webhookUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
+
     return { ok: r.ok, status: r.status };
   } catch (e) {
     return { ok: false, error: String(e) };
@@ -63,6 +71,7 @@ async function getAccessToken() {
   if (!resp.ok || !data?.access_token) {
     throw new Error(`Token refresh failed. HTTP ${resp.status} ${JSON.stringify(data)}`);
   }
+
   return data.access_token;
 }
 
@@ -211,7 +220,7 @@ module.exports = async (req, res) => {
     if (!skipLogging) {
       const sheetsPayload = {
         request_id: idempotencyKey,
-        source: "CA Print",
+        source: "Lifeline Print",
         created_at_iso: new Date().toISOString(),
 
         customer_name: from_address.name,
