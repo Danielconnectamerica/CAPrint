@@ -1,10 +1,10 @@
-// api/mail-label.js
+// /api/mail-label.js
+
 import { PDFDocument } from "pdf-lib";
 import fs from "fs";
 import path from "path";
 
 const SHEETS_WEBHOOK_URL = process.env.SHEETS_WEBHOOK_URL || "";
-const SOURCE = "CAphysical-mail";
 
 function sendJson(res, status, obj) {
   res.statusCode = status;
@@ -23,10 +23,18 @@ function parseBasicAuth(req) {
   if (!header || !header.toString().startsWith("Basic ")) return null;
 
   try {
-    const decoded = Buffer.from(header.toString().replace("Basic ", ""), "base64").toString("utf8");
+    const decoded = Buffer.from(
+      header.toString().replace("Basic ", ""),
+      "base64"
+    ).toString("utf8");
+
     const idx = decoded.indexOf(":");
     if (idx === -1) return null;
-    return { user: decoded.slice(0, idx), pass: decoded.slice(idx + 1) };
+
+    return {
+      user: decoded.slice(0, idx),
+      pass: decoded.slice(idx + 1),
+    };
   } catch {
     return null;
   }
@@ -51,9 +59,7 @@ function todayIso() {
 }
 
 async function postToSheets(webhookUrl, payload) {
-  if (!webhookUrl) {
-    return { ok: false, status: 0, error: "Missing SHEETS_WEBHOOK_URL env var" };
-  }
+  if (!webhookUrl) return null;
 
   try {
     const r = await fetch(webhookUrl, {
@@ -62,10 +68,9 @@ async function postToSheets(webhookUrl, payload) {
       body: JSON.stringify(payload),
     });
 
-    const text = await r.text().catch(() => "");
-    return { ok: r.ok, status: r.status, body: text };
+    return { ok: r.ok, status: r.status };
   } catch (e) {
-    return { ok: false, status: 0, error: String(e) };
+    return { ok: false, error: String(e) };
   }
 }
 
@@ -88,14 +93,23 @@ async function buildInstructionsPlusLabelPdf({ labelBase64 }) {
   const labelBytes = Buffer.from(labelBase64, "base64");
   const out = await PDFDocument.create();
 
-  const instructionsPath = path.join(process.cwd(), "power-off-instructions.pdf");
+  // Add instructions PDF if exists
+  const instructionsPath = path.join(
+    process.cwd(),
+    "power-off-instructions.pdf"
+  );
+
   if (fs.existsSync(instructionsPath)) {
     const instrBytes = fs.readFileSync(instructionsPath);
     const instrPdf = await PDFDocument.load(instrBytes);
-    const pages = await out.copyPages(instrPdf, instrPdf.getPageIndices());
+    const pages = await out.copyPages(
+      instrPdf,
+      instrPdf.getPageIndices()
+    );
     pages.forEach((p) => out.addPage(p));
   }
 
+  // Add letter page
   const LETTER_W = 612;
   const LETTER_H = 792;
   const page = out.addPage([LETTER_W, LETTER_H]);
@@ -105,14 +119,23 @@ async function buildInstructionsPlusLabelPdf({ labelBase64 }) {
   const targetW = 420;
   const targetH = 600;
 
-  const scale = Math.min(targetW / embeddedLabel.width, targetH / embeddedLabel.height);
+  const scale = Math.min(
+    targetW / embeddedLabel.width,
+    targetH / embeddedLabel.height
+  );
+
   const drawW = embeddedLabel.width * scale;
   const drawH = embeddedLabel.height * scale;
 
   const x = (LETTER_W - drawW) / 2;
   const y = (LETTER_H - drawH) / 2;
 
-  page.drawPage(embeddedLabel, { x, y, xScale: scale, yScale: scale });
+  page.drawPage(embeddedLabel, {
+    x,
+    y,
+    xScale: scale,
+    yScale: scale,
+  });
 
   return Buffer.from(await out.save());
 }
@@ -120,7 +143,10 @@ async function buildInstructionsPlusLabelPdf({ labelBase64 }) {
 export default async function handler(req, res) {
   try {
     if (req.method !== "POST") {
-      return sendJson(res, 405, { ok: false, error: "Method Not Allowed" });
+      return sendJson(res, 405, {
+        ok: false,
+        error: "Method Not Allowed",
+      });
     }
 
     // Basic Auth
@@ -129,16 +155,26 @@ export default async function handler(req, res) {
     const expectedPass = process.env.MAIL_PASS || "";
 
     if (!expectedUser || !expectedPass) {
-      return sendJson(res, 500, { ok: false, error: "Missing MAIL_USER/MAIL_PASS env vars" });
+      return sendJson(res, 500, {
+        ok: false,
+        error: "Missing MAIL_USER/MAIL_PASS env vars",
+      });
     }
+
     if (!creds || creds.user !== expectedUser || creds.pass !== expectedPass) {
       return unauthorized(res);
     }
 
-    const body = typeof req.body === "string" ? JSON.parse(req.body || "{}") : req.body || {};
+    const body =
+      typeof req.body === "string"
+        ? JSON.parse(req.body || "{}")
+        : req.body || {};
 
     if (!process.env.LOB_API_KEY) {
-      return sendJson(res, 500, { ok: false, error: "Missing LOB_API_KEY env var" });
+      return sendJson(res, 500, {
+        ok: false,
+        error: "Missing LOB_API_KEY env var",
+      });
     }
 
     // Required fields
@@ -161,97 +197,43 @@ export default async function handler(req, res) {
     if (!deviceType) missing.push("deviceType");
 
     if (missing.length) {
-      // Log failure too (optional, but helps)
-      const failPayload = {
-        request_id: `mail_${Date.now()}`,
-        lob_letter_id: "",
-        source: SOURCE,
-        created_at_iso: todayIso(),
-
-        customer_name: name || "",
-        customer_email: String(body.email || ""),
-        customer_phone: phone || "",
-
-        from_address1: address1 || "",
-        from_address2: address2 || "",
-        from_city: city || "",
-        from_state: state || "",
-        from_zip: zip || "",
-
-        device_type: String(deviceType || ""),
-        device_serial: String(body.deviceSerial || ""),
-        return_reason: String(body.returnReason || ""),
-        weight_oz: normalizeWeightOz(body),
-
-        service_type: "usps_ground_advantage",
-        tracking_number: "",
-        label_id: "",
-        postage_total_usd: null,
-
-        status: "Exception",
-        status_last_checked: todayIso(),
-        delivered_at: null,
-        latest_event: `Missing required fields: ${missing.join(", ")}`,
-      };
-
-      const sheetsLogged = await postToSheets(SHEETS_WEBHOOK_URL, failPayload);
-      return sendJson(res, 400, { ok: false, error: `Missing required fields: ${missing.join(", ")}`, sheetsLogged });
+      return sendJson(res, 400, {
+        ok: false,
+        error: `Missing required fields: ${missing.join(", ")}`,
+      });
     }
 
-    // 1) Generate USPS label
+    // 1️⃣ Generate USPS label
     const baseUrl = getBaseUrl(req);
+
     const labelResp = await fetch(`${baseUrl}/api/create-label`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...body, skipLogging: true }), // prevents double rows
+      body: JSON.stringify(body),
     });
 
-    const labelJson = await labelResp.json().catch(() => null);
+    const labelJson = await labelResp.json();
 
     if (!labelResp.ok || !labelJson?.labelData) {
-      const failPayload = {
-        request_id: `mail_${Date.now()}`,
-        lob_letter_id: "",
-        source: SOURCE,
-        created_at_iso: todayIso(),
-
-        customer_name: name,
-        customer_email: String(body.email || ""),
-        customer_phone: phone,
-
-        from_address1: address1,
-        from_address2: address2,
-        from_city: city,
-        from_state: state,
-        from_zip: zip,
-
-        device_type: String(deviceType || ""),
-        device_serial: String(body.deviceSerial || ""),
-        return_reason: String(body.returnReason || ""),
-        weight_oz: normalizeWeightOz(body),
-
-        service_type: "usps_ground_advantage",
-        tracking_number: "",
-        label_id: "",
-        postage_total_usd: null,
-
-        status: "Exception",
-        status_last_checked: todayIso(),
-        delivered_at: null,
-        latest_event: `Label creation failed (Endicia). HTTP ${labelResp.status}`,
-      };
-
-      const sheetsLogged = await postToSheets(SHEETS_WEBHOOK_URL, failPayload);
-      return sendJson(res, 400, { ok: false, error: "Label creation failed", details: labelJson, sheetsLogged });
+      return sendJson(res, 400, {
+        ok: false,
+        error: "Label creation failed",
+        details: labelJson,
+      });
     }
 
-    const trackingNumber = labelJson.trackingNumber || labelJson.tracking_number || "";
+    const trackingNumber =
+      labelJson.trackingNumber || labelJson.tracking_number || "";
+
     const weightOz = normalizeWeightOz(body);
 
-    // 2) Build combined PDF
-    const combinedPdfBuffer = await buildInstructionsPlusLabelPdf({ labelBase64: labelJson.labelData });
+    // 2️⃣ Build combined PDF
+    const combinedPdfBuffer =
+      await buildInstructionsPlusLabelPdf({
+        labelBase64: labelJson.labelData,
+      });
 
-    // 3) Send to Lob
+    // 3️⃣ Send to Lob
     const form = new FormData();
 
     form.set("to[name]", name);
@@ -261,107 +243,71 @@ export default async function handler(req, res) {
     form.set("to[address_state]", state);
     form.set("to[address_zip]", zip);
 
-    form.set("from[name]", process.env.LOB_FROM_NAME || "Connect America Returns");
-    form.set("from[address_line1]", process.env.LOB_FROM_ADDRESS1 || "3 Bala Plaza West");
-    form.set("from[address_city]", process.env.LOB_FROM_CITY || "Bala Cynwyd");
-    form.set("from[address_state]", process.env.LOB_FROM_STATE || "PA");
-    form.set("from[address_zip]", process.env.LOB_FROM_ZIP || "19004");
+    form.set(
+      "from[name]",
+      process.env.LOB_FROM_NAME || "Lifeline"
+    );
+    form.set(
+      "from[address_line1]",
+      process.env.LOB_FROM_ADDRESS1 || "3 Bala Plaza West"
+    );
+    form.set(
+      "from[address_city]",
+      process.env.LOB_FROM_CITY || "Bala Cynwyd"
+    );
+    form.set(
+      "from[address_state]",
+      process.env.LOB_FROM_STATE || "PA"
+    );
+    form.set(
+      "from[address_zip]",
+      process.env.LOB_FROM_ZIP || "19004"
+    );
 
     form.set("color", "true");
     form.set("use_type", "operational");
 
-    form.set("file", new Blob([combinedPdfBuffer], { type: "application/pdf" }), "return-label.pdf");
+    form.set(
+      "file",
+      new Blob([combinedPdfBuffer], { type: "application/pdf" }),
+      "return-label.pdf"
+    );
 
-    const auth = Buffer.from(`${process.env.LOB_API_KEY}:`).toString("base64");
-    const lobResp = await fetch("https://api.lob.com/v1/letters", {
-      method: "POST",
-      headers: { Authorization: `Basic ${auth}` },
-      body: form,
-    });
+    const auth = Buffer.from(
+      `${process.env.LOB_API_KEY}:`
+    ).toString("base64");
 
-    const lobJson = await lobResp.json().catch(() => null);
+    const lobResp = await fetch(
+      "https://api.lob.com/v1/letters",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Basic ${auth}`,
+        },
+        body: form,
+      }
+    );
+
+    const lobJson = await lobResp.json();
 
     if (!lobResp.ok || !lobJson?.id) {
-      const failPayload = {
-        request_id: `mail_${Date.now()}`,
-        lob_letter_id: "",
-        source: SOURCE,
-        created_at_iso: todayIso(),
-
-        customer_name: name,
-        customer_email: String(body.email || ""),
-        customer_phone: phone,
-
-        from_address1: address1,
-        from_address2: address2,
-        from_city: city,
-        from_state: state,
-        from_zip: zip,
-
-        device_type: String(deviceType || ""),
-        device_serial: String(body.deviceSerial || ""),
-        return_reason: String(body.returnReason || ""),
-        weight_oz: weightOz,
-
-        service_type: "usps_ground_advantage",
-        tracking_number: trackingNumber,
-        label_id: "",
-        postage_total_usd: null,
-
-        status: "Exception",
-        status_last_checked: todayIso(),
-        delivered_at: null,
-        latest_event: `Lob letter creation failed. HTTP ${lobResp.status}`,
-      };
-
-      const sheetsLogged = await postToSheets(SHEETS_WEBHOOK_URL, failPayload);
-      return sendJson(res, 400, { ok: false, error: "Lob letter creation failed", details: lobJson, sheetsLogged });
+      return sendJson(res, 400, {
+        ok: false,
+        error: "Lob letter creation failed",
+        details: lobJson,
+      });
     }
-
-    // ✅ Log SUCCESS to SharePoint via Power Automate
-    const sheetsPayload = {
-      request_id: lobJson.id,
-      lob_letter_id: lobJson.id,
-      source: SOURCE,
-      created_at_iso: todayIso(),
-
-      customer_name: name,
-      customer_email: String(body.email || ""),
-      customer_phone: phone,
-
-      from_address1: address1,
-      from_address2: address2,
-      from_city: city,
-      from_state: state,
-      from_zip: zip,
-
-      device_type: String(deviceType || ""),
-      device_serial: String(body.deviceSerial || ""),
-      return_reason: String(body.returnReason || ""),
-
-      weight_oz: weightOz,
-      service_type: "usps_ground_advantage",
-      tracking_number: trackingNumber,
-
-      label_id: "",
-      postage_total_usd: null,
-
-      status: "Created",
-      status_last_checked: todayIso(),
-      delivered_at: null,
-      latest_event: "Return label created; physical packet mailed.",
-    };
-
-    const sheetsLogged = await postToSheets(SHEETS_WEBHOOK_URL, sheetsPayload);
 
     return sendJson(res, 200, {
       ok: true,
       uspsTrackingNumber: trackingNumber || null,
       lobLetterId: lobJson.id,
       lobStatus: lobJson.status || null,
-      sheetsLogged, // 👈 this will tell you if Flow accepted it (202)
     });
   } catch (e) {
-    return sendJson(res, 500, { ok: false, error: String(e) });
+    return sendJson(res, 500, {
+      ok: false,
+      error: String(e),
+    });
   }
 }
