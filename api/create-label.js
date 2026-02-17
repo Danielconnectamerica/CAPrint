@@ -1,23 +1,22 @@
 // /api/create-label.js
-
 // USPS Returns (Pay-On-Use) label via Stamps.com/Endicia SERA
-
 // Weight: from dropdown (1 lb or 2 lb)
 
-const SIGNIN_BASE = process.env.SERA_SIGNIN_BASE || "https://signin.stampsendicia.com";
-
+const SIGNIN_BASE =
+  process.env.SERA_SIGNIN_BASE || "https://signin.stampsendicia.com";
 const API_BASE = process.env.SERA_API_BASE || "https://api.stampsendicia.com/sera";
 
 const CLIENT_ID = process.env.SERA_CLIENT_ID;
-
 const CLIENT_SECRET = process.env.SERA_CLIENT_SECRET;
-
 const REFRESH_TOKEN = process.env.SERA_REFRESH_TOKEN;
 
 const SHEETS_WEBHOOK_URL = process.env.SHEETS_WEBHOOK_URL || "";
 
-// Hardcoded returns warehouse (destination)
+// ✅ NEW: read instructions PDF (optional, if present in repo)
+const fs = require("fs");
+const path = require("path");
 
+// Hardcoded returns warehouse (destination)
 const RETURN_TO = {
   name: "Return Warehouse",
   company_name: "Connect America",
@@ -69,7 +68,9 @@ async function getAccessToken() {
 
   const data = await resp.json().catch(() => null);
   if (!resp.ok || !data?.access_token) {
-    throw new Error(`Token refresh failed. HTTP ${resp.status} ${JSON.stringify(data)}`);
+    throw new Error(
+      `Token refresh failed. HTTP ${resp.status} ${JSON.stringify(data)}`
+    );
   }
 
   return data.access_token;
@@ -85,7 +86,30 @@ function uuidv4() {
   return randomUUID();
 }
 
+// ✅ NEW: instructions PDF loader (returns "" if missing)
+function getInstructionsPdfBase64() {
+  try {
+    // Put your instructions PDF at ONE of these locations:
+    // 1) repo root: /return-instructions.pdf
+    // 2) public folder: /public/return-instructions.pdf
+    const rootPath = path.join(process.cwd(), "return-instructions.pdf");
+    const publicPath = path.join(process.cwd(), "public", "return-instructions.pdf");
+
+    const p = fs.existsSync(rootPath) ? rootPath : fs.existsSync(publicPath) ? publicPath : null;
+    if (!p) return "";
+
+    return fs.readFileSync(p).toString("base64");
+  } catch {
+    return "";
+  }
+}
+
 function customerFromAddress(body) {
+  // ✅ IMPORTANT:
+  // - customerEmail is the new field you’ll add in the form
+  // - email is kept as a backward-compatible fallback
+  const customerEmail = (body.customerEmail || body.email || "").trim();
+
   return {
     name: (body.name || "").trim(),
     company_name: "",
@@ -96,7 +120,7 @@ function customerFromAddress(body) {
     postal_code: (body.zip || "").trim(),
     country_code: "US",
     phone: (body.phone || "").trim(),
-    email: (body.email || "").trim(),
+    email: customerEmail,
   };
 }
 
@@ -120,19 +144,27 @@ module.exports = async (req, res) => {
     if (!CLIENT_ID || !CLIENT_SECRET || !REFRESH_TOKEN) {
       return json(res, 500, {
         ok: false,
-        error: "Missing env vars: SERA_CLIENT_ID, SERA_CLIENT_SECRET, SERA_REFRESH_TOKEN.",
+        error:
+          "Missing env vars: SERA_CLIENT_ID, SERA_CLIENT_SECRET, SERA_REFRESH_TOKEN.",
       });
     }
 
-    const body = typeof req.body === "string" ? JSON.parse(req.body || "{}") : req.body || {};
+    const body =
+      typeof req.body === "string" ? JSON.parse(req.body || "{}") : req.body || {};
 
-    // ✅ NEW: allow mail-label.js to call create-label.js without creating a SharePoint row
+    // ✅ allow mail-label.js to call create-label.js without creating a SharePoint row
     const skipLogging = body?.skipLogging === true;
+
+    // ✅ NEW: agent email (CC) captured from form (optional)
+    const agentEmail = String(body.agentEmail || "").trim();
 
     const required = ["name", "address1", "city", "state", "zip", "phone", "deviceType"];
     const missing = required.filter((k) => !String(body[k] || "").trim());
     if (missing.length) {
-      return json(res, 400, { ok: false, error: `Missing required fields: ${missing.join(", ")}` });
+      return json(res, 400, {
+        ok: false,
+        error: `Missing required fields: ${missing.join(", ")}`,
+      });
     }
 
     const from_address = customerFromAddress(body);
@@ -218,6 +250,12 @@ module.exports = async (req, res) => {
     let sheetsLogged = null;
 
     if (!skipLogging) {
+      // ✅ NEW: only include email + attachments if customer email is provided
+      // (your Flow will also conditionally send email when customer_email is not blank)
+      const shouldEmail = Boolean(from_address.email);
+
+      const instructionsBase64 = shouldEmail ? getInstructionsPdfBase64() : "";
+
       const sheetsPayload = {
         request_id: idempotencyKey,
         source: "Connect Print",
@@ -225,6 +263,7 @@ module.exports = async (req, res) => {
 
         customer_name: from_address.name,
         customer_email: from_address.email,
+        agent_email: agentEmail, // ✅ NEW
         customer_phone: from_address.phone,
         from_address1: from_address.address_line1,
         from_address2: from_address.address_line2,
@@ -242,12 +281,19 @@ module.exports = async (req, res) => {
         label_id: labelData.label_id || "",
         postage_total_usd: labelData?.shipment_cost?.total_amount ?? null,
 
+        // ✅ NEW: attachments for Power Automate email (only when customer_email exists)
+        label_pdf_base64: shouldEmail ? (maybeBase64 || "") : "",
+        label_pdf_filename: shouldEmail ? "usps-pay-on-use-return-label.pdf" : "",
+        instructions_pdf_base64: shouldEmail ? instructionsBase64 : "",
+        instructions_pdf_filename: shouldEmail ? "Return-Instructions.pdf" : "",
+
         status: "Created",
       };
 
       sheetsLogged = await postToSheets(SHEETS_WEBHOOK_URL, sheetsPayload);
     }
 
+    // ✅ Response stays the same (customer still downloads label from the site)
     if (maybeBase64) {
       return json(res, 200, {
         ok: true,
