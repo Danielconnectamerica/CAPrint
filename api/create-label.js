@@ -18,7 +18,7 @@ const RETURN_TO = {
   address_line1: "816 Parkway Drive",
   address_line2: "",
   city: "Broomall",
-  state_province: "SC",
+  state_province: "PA",
   postal_code: "19008",
   country_code: "US",
   phone: "8002862622",
