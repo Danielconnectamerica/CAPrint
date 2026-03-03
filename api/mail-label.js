@@ -116,8 +116,8 @@ async function buildInstructionsPlusLabelPdf({ labelBase64 }) {
 
   const [embeddedLabel] = await out.embedPdf(labelBytes, [0]);
 
-  const targetW = 420;
-  const targetH = 600;
+  const targetW = 288;
+  const targetH = 432;
 
   const scale = Math.min(
     targetW / embeddedLabel.width,
@@ -128,7 +128,7 @@ async function buildInstructionsPlusLabelPdf({ labelBase64 }) {
   const drawH = embeddedLabel.height * scale;
 
   const x = (LETTER_W - drawW) / 2;
-  const y = (LETTER_H - drawH) / 2;
+  const y = 150;
 
   page.drawPage(embeddedLabel, {
     x,
