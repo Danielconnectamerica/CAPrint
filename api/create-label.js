@@ -225,6 +225,7 @@ module.exports = async (req, res) => {
 
         device_type: String(body.deviceType || ""),
         device_serial: String(body.deviceSerial || ""),
+        salesforce_id: String(body.salesforceId || ""),
         return_reason: String(body.returnReason || ""),
         weight_oz: weightOz,
 
