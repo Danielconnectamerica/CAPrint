@@ -211,7 +211,7 @@ module.exports = async (req, res) => {
     if (!skipLogging) {
       const sheetsPayload = {
         request_id: idempotencyKey,
-        source: "Lifeline Print",
+        source: "Connect Print",
         created_at_iso: new Date().toISOString(),
 
         customer_name: from_address.name,
