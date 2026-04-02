@@ -204,7 +204,7 @@ export default async function handler(req, res) {
     form.set("to[address_zip]", zip);
 
     // sender
-    form.set("from[name]", process.env.LOB_FROM_NAME || "Lifeline");
+    form.set("from[name]", process.env.LOB_FROM_NAME || "Connect America");
     form.set("from[address_line1]", process.env.LOB_FROM_ADDRESS1 || "3 Bala Plaza West");
     form.set("from[address_city]", process.env.LOB_FROM_CITY || "Bala Cynwyd");
     form.set("from[address_state]", process.env.LOB_FROM_STATE || "PA");
