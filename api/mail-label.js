@@ -62,6 +62,30 @@ function normalizeWeightOz(body) {
   return null;
 }
 
+function safeStringify(value) {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function getLobErrorMessage(lobJson, fallback = "Lob letter creation failed") {
+  if (!lobJson) return fallback;
+
+  if (typeof lobJson === "string" && lobJson.trim()) {
+    return lobJson;
+  }
+
+  return (
+    lobJson?.error?.message ||
+    lobJson?.message ||
+    lobJson?.error_message ||
+    lobJson?.error ||
+    fallback
+  );
+}
+
 /**
  * Build PDF:
  * - Includes power-off-instructions.pdf (all pages) if present
@@ -94,7 +118,10 @@ async function buildInstructionsPlusLabelPdf({ labelBase64 }) {
   const targetH = 432; // 6"
 
   // Fit label into 4x6 box (preserve aspect ratio)
-  let scale = Math.min(targetW / embeddedLabel.width, targetH / embeddedLabel.height);
+  let scale = Math.min(
+    targetW / embeddedLabel.width,
+    targetH / embeddedLabel.height
+  );
   let drawW = embeddedLabel.width * scale;
   let drawH = embeddedLabel.height * scale;
 
@@ -129,17 +156,26 @@ export default async function handler(req, res) {
     const creds = parseBasicAuth(req);
     const expectedUser = process.env.MAIL_USER || "";
     const expectedPass = process.env.MAIL_PASS || "";
+
     if (!expectedUser || !expectedPass) {
-      return sendJson(res, 500, { ok: false, error: "Missing MAIL_USER/MAIL_PASS env vars" });
+      return sendJson(res, 500, {
+        ok: false,
+        error: "Missing MAIL_USER/MAIL_PASS env vars",
+      });
     }
+
     if (!creds || creds.user !== expectedUser || creds.pass !== expectedPass) {
       return unauthorized(res);
     }
 
-    const body = typeof req.body === "string" ? JSON.parse(req.body || "{}") : (req.body || {});
+    const body =
+      typeof req.body === "string" ? JSON.parse(req.body || "{}") : (req.body || {});
 
     if (!process.env.LOB_API_KEY) {
-      return sendJson(res, 500, { ok: false, error: "Missing LOB_API_KEY env var" });
+      return sendJson(res, 500, {
+        ok: false,
+        error: "Missing LOB_API_KEY env var",
+      });
     }
 
     // Required fields
@@ -162,7 +198,10 @@ export default async function handler(req, res) {
     if (!deviceType) missing.push("deviceType");
 
     if (missing.length) {
-      return sendJson(res, 400, { ok: false, error: `Missing required fields: ${missing.join(", ")}` });
+      return sendJson(res, 400, {
+        ok: false,
+        error: `Missing required fields: ${missing.join(", ")}`,
+      });
     }
 
     // 1) Generate USPS label
@@ -178,13 +217,17 @@ export default async function handler(req, res) {
     if (!labelResp.ok || !labelJson?.labelData) {
       return sendJson(res, 400, {
         ok: false,
-        error: "Label creation failed",
+        error:
+          labelJson?.error ||
+          labelJson?.message ||
+          "Label creation failed",
         httpStatus: labelResp.status,
         details: labelJson,
       });
     }
 
-    const trackingNumber = labelJson.trackingNumber || labelJson.tracking_number || "";
+    const trackingNumber =
+      labelJson.trackingNumber || labelJson.tracking_number || "";
     const weightOz = normalizeWeightOz(body);
 
     // 2) Build combined PDF
@@ -205,7 +248,10 @@ export default async function handler(req, res) {
 
     // sender
     form.set("from[name]", process.env.LOB_FROM_NAME || "Connect America");
-    form.set("from[address_line1]", process.env.LOB_FROM_ADDRESS1 || "3 Bala Plaza West");
+    form.set(
+      "from[address_line1]",
+      process.env.LOB_FROM_ADDRESS1 || "3 Bala Plaza West"
+    );
     form.set("from[address_city]", process.env.LOB_FROM_CITY || "Bala Cynwyd");
     form.set("from[address_state]", process.env.LOB_FROM_STATE || "PA");
     form.set("from[address_zip]", process.env.LOB_FROM_ZIP || "19004");
@@ -213,8 +259,6 @@ export default async function handler(req, res) {
     // letter options
     form.set("color", "true");
     form.set("use_type", "operational");
-
-    // ✅ Insert a blank address page BEFORE your PDF so the address window doesn't print on your content.
     form.set("address_placement", "insert_blank_page");
 
     // attach file
@@ -231,14 +275,39 @@ export default async function handler(req, res) {
       body: form,
     });
 
-    const lobJson = await lobResp.json().catch(() => null);
+    const lobText = await lobResp.text();
+    let lobJson = null;
+
+    try {
+      lobJson = lobText ? JSON.parse(lobText) : null;
+    } catch {
+      lobJson = { raw: lobText };
+    }
 
     if (!lobResp.ok || !lobJson?.id) {
       return sendJson(res, 400, {
         ok: false,
-        error: "Lob letter creation failed",
+        error: getLobErrorMessage(lobJson, "Lob letter creation failed"),
         httpStatus: lobResp.status,
         details: lobJson,
+        debug: {
+          to: {
+            name,
+            address1,
+            address2,
+            city,
+            state,
+            zip,
+          },
+          from: {
+            name: process.env.LOB_FROM_NAME || "Connect America",
+            address1: process.env.LOB_FROM_ADDRESS1 || "3 Bala Plaza West",
+            city: process.env.LOB_FROM_CITY || "Bala Cynwyd",
+            state: process.env.LOB_FROM_STATE || "PA",
+            zip: process.env.LOB_FROM_ZIP || "19004",
+          },
+          lobRaw: lobText || null,
+        },
       });
     }
 
@@ -250,6 +319,13 @@ export default async function handler(req, res) {
       lobStatus: lobJson.status || null,
     });
   } catch (e) {
-    return sendJson(res, 500, { ok: false, error: String(e) });
+    return sendJson(res, 500, {
+      ok: false,
+      error: e?.message || String(e),
+      stack:
+        process.env.NODE_ENV !== "production"
+          ? e?.stack || null
+          : undefined,
+    });
   }
 }
