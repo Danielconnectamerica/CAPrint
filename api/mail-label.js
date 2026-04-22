@@ -179,6 +179,7 @@ export default async function handler(req, res) {
     }
 
     // Required fields
+    const agentName = requireField(body, "agentName");
     const name = requireField(body, "name");
     const address1 = requireField(body, "address1");
     const address2 = requireField(body, "address2") || "";
@@ -189,6 +190,7 @@ export default async function handler(req, res) {
     const deviceType = requireField(body, "deviceType");
 
     const missing = [];
+    if (!agentName) missing.push("agentName");
     if (!name) missing.push("name");
     if (!address1) missing.push("address1");
     if (!city) missing.push("city");
@@ -313,6 +315,7 @@ export default async function handler(req, res) {
 
     return sendJson(res, 200, {
       ok: true,
+      agentName,
       uspsTrackingNumber: trackingNumber || null,
       weightOz: weightOz || null,
       lobLetterId: lobJson.id,
