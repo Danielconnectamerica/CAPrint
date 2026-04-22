@@ -88,6 +88,9 @@
 
 <form id="returnForm" novalidate>
 
+  <label>Agent Name<span class="required-star">*</span></label>
+  <input type="text" name="agentName" required />
+
   <label>Full Name<span class="required-star">*</span></label>
   <input type="text" name="name" required />
 
@@ -175,7 +178,7 @@
     <option value="Smartwatch" data-weight="1">Smartwatch — 1 lb</option>
     <option value="Mobile LTE" data-weight="1">Mobile LTE — 1 lb</option>
     <option value="Fall Button" data-weight="1">Fallbutton — 1 lb</option>
-     <option value="Pendant" data-weight="1">Pendant — 1 lb</option>
+    <option value="Pendant" data-weight="1">Pendant — 1 lb</option>
     <option value="Other" data-weight="2">Other — 2 lb</option>
   </select>
 
@@ -220,10 +223,16 @@
     const requiredFields = form.querySelectorAll("[required]");
     const missing = [];
 
+    let agentNameMissing = false;
+
     requiredFields.forEach(field => {
       if (!field.value.trim()) {
         field.classList.add("error-field");
         missing.push(field.name);
+
+        if (field.name === "agentName") {
+          agentNameMissing = true;
+        }
       }
     });
 
@@ -234,8 +243,13 @@
 
     if (missing.length) {
       messageDiv.className = "error";
-      messageDiv.innerHTML =
-        "Please complete all required fields.";
+
+      if (agentNameMissing) {
+        messageDiv.innerHTML = "You forgot to enter the Agent Name.";
+      } else {
+        messageDiv.innerHTML = "Please complete all required fields.";
+      }
+
       return false;
     }
 
