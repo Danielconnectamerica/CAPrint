@@ -120,7 +120,7 @@ module.exports = async (req, res) => {
     // ✅ NEW: allow mail-label.js to call create-label.js without creating a SharePoint row
     const skipLogging = body?.skipLogging === true;
 
-    const required = ["name", "address1", "city", "state", "zip", "phone", "deviceType"];
+    const required = ["agentName", "name", "address1", "city", "state", "zip", "phone", "deviceType"];
     const missing = required.filter((k) => !String(body[k] || "").trim());
     if (missing.length) {
       return json(res, 400, { ok: false, error: `Missing required fields: ${missing.join(", ")}` });
@@ -213,6 +213,8 @@ module.exports = async (req, res) => {
         request_id: idempotencyKey,
         source: "Connect Print",
         created_at_iso: new Date().toISOString(),
+
+        agent_name: String(body.agentName || ""),
 
         customer_name: from_address.name,
         customer_email: from_address.email,
