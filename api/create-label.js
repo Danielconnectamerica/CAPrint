@@ -1,9 +1,12 @@
 // /api/create-label.js
 // USPS Returns (Pay-On-Use) label via Stamps.com/Endicia SERA
 // Weight: from dropdown (1 lb or 2 lb)
+// Hazmat: all device returns contain batteries, so submit as USPS hazmat/battery
 
-const SIGNIN_BASE = process.env.SERA_SIGNIN_BASE || "https://signin.stampsendicia.com";
-const API_BASE = process.env.SERA_API_BASE || "https://api.stampsendicia.com/sera";
+const SIGNIN_BASE =
+  process.env.SERA_SIGNIN_BASE || "https://signin.stampsendicia.com";
+const API_BASE =
+  process.env.SERA_API_BASE || "https://api.stampsendicia.com/sera";
 
 const CLIENT_ID = process.env.SERA_CLIENT_ID;
 const CLIENT_SECRET = process.env.SERA_CLIENT_SECRET;
@@ -33,12 +36,14 @@ function json(res, status, obj) {
 
 async function postToSheets(webhookUrl, payload) {
   if (!webhookUrl) return null;
+
   try {
     const r = await fetch(webhookUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
+
     return { ok: r.ok, status: r.status };
   } catch (e) {
     return { ok: false, error: String(e) };
@@ -60,9 +65,13 @@ async function getAccessToken() {
   });
 
   const data = await resp.json().catch(() => null);
+
   if (!resp.ok || !data?.access_token) {
-    throw new Error(`Token refresh failed. HTTP ${resp.status} ${JSON.stringify(data)}`);
+    throw new Error(
+      `Token refresh failed. HTTP ${resp.status} ${JSON.stringify(data)}`
+    );
   }
+
   return data.access_token;
 }
 
@@ -111,22 +120,39 @@ module.exports = async (req, res) => {
     if (!CLIENT_ID || !CLIENT_SECRET || !REFRESH_TOKEN) {
       return json(res, 500, {
         ok: false,
-        error: "Missing env vars: SERA_CLIENT_ID, SERA_CLIENT_SECRET, SERA_REFRESH_TOKEN.",
+        error:
+          "Missing env vars: SERA_CLIENT_ID, SERA_CLIENT_SECRET, SERA_REFRESH_TOKEN.",
       });
     }
 
-    const body = typeof req.body === "string" ? JSON.parse(req.body || "{}") : req.body || {};
+    const body =
+      typeof req.body === "string" ? JSON.parse(req.body || "{}") : req.body || {};
 
-    // ✅ NEW: allow mail-label.js to call create-label.js without creating a SharePoint row
+    // allow mail-label.js to call create-label.js without creating a SharePoint row
     const skipLogging = body?.skipLogging === true;
 
-    const required = ["agentName", "name", "address1", "city", "state", "zip", "phone", "deviceType"];
+    const required = [
+      "agentName",
+      "name",
+      "address1",
+      "city",
+      "state",
+      "zip",
+      "phone",
+      "deviceType",
+    ];
+
     const missing = required.filter((k) => !String(body[k] || "").trim());
+
     if (missing.length) {
-      return json(res, 400, { ok: false, error: `Missing required fields: ${missing.join(", ")}` });
+      return json(res, 400, {
+        ok: false,
+        error: `Missing required fields: ${missing.join(", ")}`,
+      });
     }
 
     const from_address = customerFromAddress(body);
+
     if (
       !from_address.name ||
       !from_address.address_line1 ||
@@ -140,7 +166,22 @@ module.exports = async (req, res) => {
       });
     }
 
+    // Weight still comes from your Vercel dropdown.
     const weightOz = normalizeWeightOz(body);
+
+    // All selected devices contain batteries, so every Connect America print return is submitted as hazmat.
+    const containsBattery = true;
+    const batteryFlag = "H";
+    const hazmatType = "Lithium battery installed in equipment";
+    const shippingRule = "Ground/surface only";
+
+    const deviceSerial = String(body.deviceSerial || "").trim();
+    const returnReason = String(body.returnReason || "").trim();
+    const salesforceId = String(body.salesforceId || "").trim();
+
+    // Internal reference only. USPS official H comes from advanced_options.special_handling.
+    const reference1 = deviceSerial ? `${batteryFlag}-${deviceSerial}` : batteryFlag;
+
     const accessToken = await getAccessToken();
 
     const payload = {
@@ -154,6 +195,7 @@ module.exports = async (req, res) => {
       service_type: "usps_ground_advantage",
       ship_date: todayYYYYMMDD(),
       is_return_label: true,
+      delivery_confirmation_type: "tracking",
 
       package: {
         packaging_type: "package",
@@ -163,6 +205,13 @@ module.exports = async (req, res) => {
 
       advanced_options: {
         is_pay_on_use: true,
+        return_options: {
+          outbound_label_id: "0",
+        },
+        special_handling: {
+          special_contents_type: "hazardous_materials",
+          fragile: false,
+        },
       },
 
       label_options: {
@@ -172,8 +221,8 @@ module.exports = async (req, res) => {
       },
 
       references: {
-        reference1: (body.deviceSerial || "").trim(),
-        reference2: (body.returnReason || "").trim(),
+        reference1,
+        reference2: returnReason,
       },
 
       is_test_label: false,
@@ -203,9 +252,10 @@ module.exports = async (req, res) => {
     }
 
     const trackingNumber = labelData.tracking_number || "";
-    const maybeBase64 = labelData.labels?.[0]?.label_data || labelData.label_data || null;
+    const maybeBase64 =
+      labelData.labels?.[0]?.label_data || labelData.label_data || null;
 
-    // ✅ UPDATED: SharePoint logging is optional
+    // SharePoint logging is optional
     let sheetsLogged = null;
 
     if (!skipLogging) {
@@ -226,10 +276,20 @@ module.exports = async (req, res) => {
         from_zip: from_address.postal_code,
 
         device_type: String(body.deviceType || ""),
-        device_serial: String(body.deviceSerial || ""),
-        salesforce_id: String(body.salesforceId || ""),
-        return_reason: String(body.returnReason || ""),
+        device_serial: deviceSerial,
+        salesforce_id: salesforceId,
+        return_reason: returnReason,
         weight_oz: weightOz,
+
+        // Battery/H fields for SharePoint / Excel / Power Automate
+        battery_flag: batteryFlag,
+        contains_battery: containsBattery,
+        hazmat_type: hazmatType,
+        shipping_rule: shippingRule,
+
+        // Useful audit fields to prove what was sent to SERA
+        sera_special_contents_type: "hazardous_materials",
+        sera_special_handling_fragile: false,
 
         service_type: labelData.service_type || "usps_ground_advantage",
         tracking_number: trackingNumber,
@@ -250,14 +310,30 @@ module.exports = async (req, res) => {
         mimeType: "application/pdf",
         labelData: maybeBase64,
         sheetsLogged,
+
+        batteryFlag,
+        containsBattery,
+        hazmatType,
+        shippingRule,
+        seraSpecialContentsType: "hazardous_materials",
       });
     }
 
     const labelHref = labelData.labels?.[0]?.href || "";
+
     if (labelHref) {
       const fileResp = await fetch(labelHref, {
         headers: { Authorization: `Bearer ${accessToken}` },
       });
+
+      if (!fileResp.ok) {
+        return json(res, 500, {
+          ok: false,
+          error: `Label created but fetching label PDF failed. HTTP ${fileResp.status}`,
+          sheetsLogged,
+        });
+      }
+
       const buf = Buffer.from(await fileResp.arrayBuffer());
       const base64 = buf.toString("base64");
 
@@ -268,6 +344,12 @@ module.exports = async (req, res) => {
         mimeType: "application/pdf",
         labelData: base64,
         sheetsLogged,
+
+        batteryFlag,
+        containsBattery,
+        hazmatType,
+        shippingRule,
+        seraSpecialContentsType: "hazardous_materials",
       });
     }
 
