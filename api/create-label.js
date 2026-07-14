@@ -5,6 +5,7 @@
 
 const SIGNIN_BASE =
   process.env.SERA_SIGNIN_BASE || "https://signin.stampsendicia.com";
+
 const API_BASE =
   process.env.SERA_API_BASE || "https://api.stampsendicia.com/sera";
 
@@ -14,8 +15,9 @@ const REFRESH_TOKEN = process.env.SERA_REFRESH_TOKEN;
 
 const SHEETS_WEBHOOK_URL = process.env.SHEETS_WEBHOOK_URL || "";
 
-// Hardcoded returns warehouse (destination)
-const RETURN_TO = {
+// Base returns warehouse destination.
+// The customer's name will be added dynamically later.
+const RETURN_TO_BASE = {
   name: "Return Warehouse",
   company_name: "Connect America Returns",
   address_line1: "816 Parkway Drive",
@@ -40,13 +42,21 @@ async function postToSheets(webhookUrl, payload) {
   try {
     const r = await fetch(webhookUrl, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+      },
       body: JSON.stringify(payload),
     });
 
-    return { ok: r.ok, status: r.status };
+    return {
+      ok: r.ok,
+      status: r.status,
+    };
   } catch (e) {
-    return { ok: false, error: String(e) };
+    return {
+      ok: false,
+      error: String(e),
+    };
   }
 }
 
@@ -55,7 +65,9 @@ async function getAccessToken() {
 
   const resp = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+    },
     body: JSON.stringify({
       grant_type: "refresh_token",
       client_id: CLIENT_ID,
@@ -80,33 +92,42 @@ function todayYYYYMMDD() {
 }
 
 function uuidv4() {
-  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+  if (globalThis.crypto?.randomUUID) {
+    return globalThis.crypto.randomUUID();
+  }
+
   const { randomUUID } = require("crypto");
   return randomUUID();
 }
 
 function customerFromAddress(body) {
   return {
-    name: (body.name || "").trim(),
+    name: String(body.name || "").trim(),
     company_name: "",
-    address_line1: (body.address1 || "").trim(),
-    address_line2: (body.address2 || "").trim(),
-    city: (body.city || "").trim(),
-    state_province: (body.state || "").trim(),
-    postal_code: (body.zip || "").trim(),
+    address_line1: String(body.address1 || "").trim(),
+    address_line2: String(body.address2 || "").trim(),
+    city: String(body.city || "").trim(),
+    state_province: String(body.state || "").trim(),
+    postal_code: String(body.zip || "").trim(),
     country_code: "US",
-    phone: (body.phone || "").trim(),
-    email: (body.email || "").trim(),
+    phone: String(body.phone || "").trim(),
+    email: String(body.email || "").trim(),
   };
 }
 
 function normalizeWeightOz(body) {
   // Prefer weightOz from UI; fallback to weightLbs; then default 32 oz
   const oz = Number(body.weightOz);
-  if (Number.isFinite(oz) && (oz === 16 || oz === 32)) return oz;
+
+  if (Number.isFinite(oz) && (oz === 16 || oz === 32)) {
+    return oz;
+  }
 
   const lbs = Number(body.weightLbs);
-  if (Number.isFinite(lbs) && (lbs === 1 || lbs === 2)) return lbs * 16;
+
+  if (Number.isFinite(lbs) && (lbs === 1 || lbs === 2)) {
+    return lbs * 16;
+  }
 
   return 32;
 }
@@ -114,7 +135,10 @@ function normalizeWeightOz(body) {
 module.exports = async (req, res) => {
   try {
     if (req.method !== "POST") {
-      return json(res, 405, { ok: false, error: "Method Not Allowed" });
+      return json(res, 405, {
+        ok: false,
+        error: "Method Not Allowed",
+      });
     }
 
     if (!CLIENT_ID || !CLIENT_SECRET || !REFRESH_TOKEN) {
@@ -126,9 +150,12 @@ module.exports = async (req, res) => {
     }
 
     const body =
-      typeof req.body === "string" ? JSON.parse(req.body || "{}") : req.body || {};
+      typeof req.body === "string"
+        ? JSON.parse(req.body || "{}")
+        : req.body || {};
 
-    // allow mail-label.js to call create-label.js without creating a SharePoint row
+    // Allow mail-label.js to call create-label.js
+    // without creating another SharePoint row.
     const skipLogging = body?.skipLogging === true;
 
     const required = [
@@ -142,7 +169,9 @@ module.exports = async (req, res) => {
       "deviceType",
     ];
 
-    const missing = required.filter((k) => !String(body[k] || "").trim());
+    const missing = required.filter(
+      (key) => !String(body[key] || "").trim()
+    );
 
     if (missing.length) {
       return json(res, 400, {
@@ -162,14 +191,36 @@ module.exports = async (req, res) => {
     ) {
       return json(res, 400, {
         ok: false,
-        error: "From address incomplete (name, address, city, state, zip required).",
+        error:
+          "From address incomplete (name, address, city, state, zip required).",
       });
     }
 
-    // Weight still comes from your Vercel dropdown.
+    /*
+     * Add the customer's full name to the warehouse destination.
+     *
+     * Example:
+     * Return - John Smith
+     * Connect America Returns
+     * 816 Parkway Drive
+     */
+    const customerName = String(body.name || "").trim();
+
+    const returnTo = {
+      ...RETURN_TO_BASE,
+
+      // Limit the line length to reduce the possibility of truncation
+      // or rejection by the label provider.
+      name: customerName
+        ? `Return - ${customerName}`.slice(0, 35)
+        : "Return Warehouse",
+    };
+
+    // Weight still comes from the Vercel dropdown.
     const weightOz = normalizeWeightOz(body);
 
-    // All selected devices contain batteries, so every Connect America print return is submitted as hazmat.
+    // All selected devices contain batteries, so every Connect America
+    // print return is submitted as hazmat.
     const containsBattery = true;
     const batteryFlag = "H";
     const hazmatType = "Lithium battery installed in equipment";
@@ -179,8 +230,11 @@ module.exports = async (req, res) => {
     const returnReason = String(body.returnReason || "").trim();
     const salesforceId = String(body.salesforceId || "").trim();
 
-    // Internal reference only. USPS official H comes from advanced_options.special_handling.
-    const reference1 = deviceSerial ? `${batteryFlag}-${deviceSerial}` : batteryFlag;
+    // Internal reference only.
+    // USPS official H comes from advanced_options.special_handling.
+    const reference1 = deviceSerial
+      ? `${batteryFlag}-${deviceSerial}`
+      : batteryFlag;
 
     const accessToken = await getAccessToken();
 
@@ -189,8 +243,9 @@ module.exports = async (req, res) => {
       ship_from_address: from_address,
       sender_address: from_address,
 
-      to_address: RETURN_TO,
-      return_address: RETURN_TO,
+      // Dynamic destination includes the customer's full name.
+      to_address: returnTo,
+      return_address: returnTo,
 
       service_type: "usps_ground_advantage",
       ship_date: todayYYYYMMDD(),
@@ -205,9 +260,11 @@ module.exports = async (req, res) => {
 
       advanced_options: {
         is_pay_on_use: true,
+
         return_options: {
           outbound_label_id: "0",
         },
+
         special_handling: {
           special_contents_type: "hazardous_materials",
           fragile: false,
@@ -230,15 +287,18 @@ module.exports = async (req, res) => {
 
     const idempotencyKey = uuidv4();
 
-    const labelResp = await fetch(`${API_BASE.replace(/\/+$/, "")}/v1/labels`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${accessToken}`,
-        "Idempotency-Key": idempotencyKey,
-      },
-      body: JSON.stringify(payload),
-    });
+    const labelResp = await fetch(
+      `${API_BASE.replace(/\/+$/, "")}/v1/labels`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+          "Idempotency-Key": idempotencyKey,
+        },
+        body: JSON.stringify(payload),
+      }
+    );
 
     const labelData = await labelResp.json().catch(() => null);
 
@@ -252,10 +312,13 @@ module.exports = async (req, res) => {
     }
 
     const trackingNumber = labelData.tracking_number || "";
-    const maybeBase64 =
-      labelData.labels?.[0]?.label_data || labelData.label_data || null;
 
-    // SharePoint logging is optional
+    const maybeBase64 =
+      labelData.labels?.[0]?.label_data ||
+      labelData.label_data ||
+      null;
+
+    // SharePoint logging is optional.
     let sheetsLogged = null;
 
     if (!skipLogging) {
@@ -269,6 +332,7 @@ module.exports = async (req, res) => {
         customer_name: from_address.name,
         customer_email: from_address.email,
         customer_phone: from_address.phone,
+
         from_address1: from_address.address_line1,
         from_address2: from_address.address_line2,
         from_city: from_address.city,
@@ -281,25 +345,32 @@ module.exports = async (req, res) => {
         return_reason: returnReason,
         weight_oz: weightOz,
 
-        // Battery/H fields for SharePoint / Excel / Power Automate
+        // Battery/H fields for SharePoint, Excel, and Power Automate.
         battery_flag: batteryFlag,
         contains_battery: containsBattery,
         hazmat_type: hazmatType,
         shipping_rule: shippingRule,
 
-        // Useful audit fields to prove what was sent to SERA
+        // Audit fields showing what was sent to SERA.
         sera_special_contents_type: "hazardous_materials",
         sera_special_handling_fragile: false,
 
-        service_type: labelData.service_type || "usps_ground_advantage",
+        service_type:
+          labelData.service_type || "usps_ground_advantage",
+
         tracking_number: trackingNumber,
         label_id: labelData.label_id || "",
-        postage_total_usd: labelData?.shipment_cost?.total_amount ?? null,
+
+        postage_total_usd:
+          labelData?.shipment_cost?.total_amount ?? null,
 
         status: "Created",
       };
 
-      sheetsLogged = await postToSheets(SHEETS_WEBHOOK_URL, sheetsPayload);
+      sheetsLogged = await postToSheets(
+        SHEETS_WEBHOOK_URL,
+        sheetsPayload
+      );
     }
 
     if (maybeBase64) {
@@ -323,13 +394,17 @@ module.exports = async (req, res) => {
 
     if (labelHref) {
       const fileResp = await fetch(labelHref, {
-        headers: { Authorization: `Bearer ${accessToken}` },
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
       });
 
       if (!fileResp.ok) {
         return json(res, 500, {
           ok: false,
-          error: `Label created but fetching label PDF failed. HTTP ${fileResp.status}`,
+          error:
+            `Label created but fetching label PDF failed. ` +
+            `HTTP ${fileResp.status}`,
           sheetsLogged,
         });
       }
@@ -355,11 +430,16 @@ module.exports = async (req, res) => {
 
     return json(res, 500, {
       ok: false,
-      error: "Label created but no label data returned (unexpected response shape).",
+      error:
+        "Label created but no label data returned " +
+        "(unexpected response shape).",
       raw: labelData,
       sheetsLogged,
     });
   } catch (e) {
-    return json(res, 500, { ok: false, error: String(e) });
+    return json(res, 500, {
+      ok: false,
+      error: String(e),
+    });
   }
 };
