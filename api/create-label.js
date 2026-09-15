@@ -204,6 +204,7 @@ module.exports = async (req, res) => {
      * Connect America Returns
      * 816 Parkway Drive
      */
+
     const customerName = String(body.name || "").trim();
 
     const returnTo = {
@@ -219,8 +220,8 @@ module.exports = async (req, res) => {
     // Weight still comes from the Vercel dropdown.
     const weightOz = normalizeWeightOz(body);
 
-    // All selected devices contain batteries, so every Connect America
-    // print return is submitted as hazmat.
+    // All selected devices contain one installed lithium battery,
+    // so every Connect America print return is submitted as hazmat.
     const containsBattery = true;
     const batteryFlag = "H";
     const hazmatType = "Lithium battery installed in equipment";
@@ -277,9 +278,21 @@ module.exports = async (req, res) => {
         label_output_type: "base64",
       },
 
+      /*
+       * Printed USPS label messages.
+       *
+       * These help make it clear to the customer and USPS employee
+       * that this is a used electronic device with ONE lithium-ion
+       * battery installed inside the equipment.
+       *
+       * There are no loose or spare batteries in the package.
+       */
       references: {
         reference1,
         reference2: returnReason,
+        printed_message1: "RESTRICTED ELECTRONIC DEVICE",
+        printed_message2:
+          "1 LI-ION BATTERY INSTALLED - NO LOOSE BATTERIES",
       },
 
       is_test_label: false,
@@ -351,6 +364,11 @@ module.exports = async (req, res) => {
         hazmat_type: hazmatType,
         shipping_rule: shippingRule,
 
+        // Additional audit detail
+        battery_configuration:
+          "1 lithium-ion battery installed in equipment",
+        loose_batteries: false,
+
         // Audit fields showing what was sent to SERA.
         sera_special_contents_type: "hazardous_materials",
         sera_special_handling_fragile: false,
@@ -386,6 +404,9 @@ module.exports = async (req, res) => {
         containsBattery,
         hazmatType,
         shippingRule,
+        batteryConfiguration:
+          "1 lithium-ion battery installed in equipment",
+        looseBatteries: false,
         seraSpecialContentsType: "hazardous_materials",
       });
     }
@@ -424,6 +445,9 @@ module.exports = async (req, res) => {
         containsBattery,
         hazmatType,
         shippingRule,
+        batteryConfiguration:
+          "1 lithium-ion battery installed in equipment",
+        looseBatteries: false,
         seraSpecialContentsType: "hazardous_materials",
       });
     }
